@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-sand-100 text-sand-900 font-sans antialiased selection:bg-forest-100 selection:text-forest-900;
+  }
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #EFECE3;
+}
+::-webkit-scrollbar-thumb {
+  background: #C7C3B6;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #A9A496;
+}
+
+/* Operations Table Styling */
+.ops-table th {
+  @apply bg-sand-200 text-sand-700 text-xs font-semibold uppercase tracking-wider py-3 px-4 text-left border-b border-sand-300;
+}
+.ops-table td {
+  @apply py-3 px-4 text-sm text-sand-900 border-b border-sand-200 transition-colors;
+}
+.ops-table tr:hover td {
+  @apply bg-sand-50/80;
+}
+
+/* Badge and KPI styling */
+.kpi-border {
+  border-left: 4px solid var(--kpi-color, #174A3A);
+}
