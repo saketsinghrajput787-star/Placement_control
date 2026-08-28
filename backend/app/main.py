@@ -25,31 +25,6 @@ def auto_migrate_schema(engine):
     except Exception as exc:
         print(f"Auto-migration warning: {exc}")
 
-# Create tables and auto-migrate existing tables on startup
-Base.metadata.create_all(bind=engine)
-auto_migrate_schema(engine)
-
-# Ensure default placement session exists and bind unassigned records
-from app.db.session import SessionLocal
-from app.api.deps import get_or_create_active_session
-with SessionLocal() as _db:
-    try:
-        active_sess = get_or_create_active_session(_db)
-        sid = active_sess.id
-        with engine.connect() as conn:
-            inspector = inspect(engine)
-            tables = inspector.get_table_names()
-            for t in tables:
-                cols = [c["name"] for c in inspector.get_columns(t)]
-                if "placement_session_id" in cols:
-                    try:
-                        conn.execute(text(f"UPDATE {t} SET placement_session_id = :sid WHERE placement_session_id IS NULL OR placement_session_id = ''"), {"sid": sid})
-                        conn.commit()
-                    except Exception:
-                        pass
-    except Exception as e:
-        print(f"Session init warning: {e}")
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
@@ -64,6 +39,16 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+@app.on_event("startup")
+def on_startup():
+    try:
+        Base.metadata.create_all(bind=engine)
+        auto_migrate_schema(engine)
+        from app.db.init_db import init_db
+        init_db(engine)
+    except Exception as exc:
+        logger.error(f"Startup initialization error: {exc}", exc_info=True)
 
 # CORS configuration
 cors_origins = settings.CORS_ORIGINS

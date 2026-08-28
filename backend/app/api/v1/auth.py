@@ -22,26 +22,26 @@ def login(login_data: LoginRequest, db: Session = Depends(get_db)):
     # 2. If not found by direct email, try finding by Student code or email
     if not user:
         stud = db.query(Student).filter((Student.student_code.ilike(email_clean)) | (Student.email.ilike(email_clean))).first()
-        if stud:
-            user = db.query(User).get(stud.user_id)
+        if stud and stud.user_id:
+            user = db.query(User).filter(User.id == stud.user_id).first()
             
     # 3. Try finding by Company code or name
     if not user:
         comp = db.query(Company).filter((Company.company_code.ilike(email_clean)) | (Company.name.ilike(email_clean))).first()
-        if comp:
-            user = db.query(User).get(comp.user_id)
+        if comp and comp.user_id:
+            user = db.query(User).filter(User.id == comp.user_id).first()
 
     # 4. Fallback matching for company keywords/roles
     if not user and (role_hint == "COMPANY" or "technova" in email_clean or "company" in email_clean or "placement.edu" in email_clean):
         comp = db.query(Company).first()
-        if comp:
-            user = db.query(User).get(comp.user_id)
+        if comp and comp.user_id:
+            user = db.query(User).filter(User.id == comp.user_id).first()
             
     # 5. Fallback matching for student keywords/roles
     if not user and (role_hint == "STUDENT" or "student" in email_clean or "s0421" in email_clean or "s001" in email_clean):
         stud = db.query(Student).first()
-        if stud:
-            user = db.query(User).get(stud.user_id)
+        if stud and stud.user_id:
+            user = db.query(User).filter(User.id == stud.user_id).first()
 
     if not user:
         raise HTTPException(
