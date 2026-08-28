@@ -19,9 +19,13 @@ interface OperationsContextType {
   isLiveConnected: boolean;
   lastSyncTime: string;
   liveBannerMessage: string | null;
+  syncCounter: number;
 
+  triggerSync: () => void;
   loadDashboardData: () => Promise<void>;
   generateSchedule: () => Promise<void>;
+  resetSchedule: () => Promise<void>;
+  reinstateInterview: (studentId: string, companyId: string) => Promise<void>;
   setSelectedInterview: (interview: Interview | null) => void;
   setIsCopilotOpen: (open: boolean) => void;
   setIsDisruptionModalOpen: (open: boolean) => void;
@@ -37,6 +41,7 @@ const OperationsContext = createContext<OperationsContextType | undefined>(undef
 
 export const OperationsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
+  const [syncCounter, setSyncCounter] = useState<number>(0);
   const [scheduleVersion, setScheduleVersion] = useState<ScheduleVersion | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsDashboard | null>(null);
   const [conflicts, setConflicts] = useState<ConflictItem[]>([]);
@@ -52,6 +57,11 @@ export const OperationsProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [isLiveConnected, setIsLiveConnected] = useState<boolean>(false);
   const [lastSyncTime, setLastSyncTime] = useState<string>('just now');
   const [liveBannerMessage, setLiveBannerMessage] = useState<string | null>(null);
+
+  const triggerSync = () => {
+    setSyncCounter((prev) => prev + 1);
+    loadDashboardData();
+  };
 
   const loadDashboardData = async () => {
     setIsLoading(true);
@@ -69,6 +79,7 @@ export const OperationsProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setConflicts(conflictsRes.data.conflicts || []);
       setNotifications(notifRes.data || []);
       setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      setSyncCounter((prev) => prev + 1);
     } catch (err: any) {
       console.error('Failed to load operations data', err);
       setError(err.response?.data?.detail || 'Failed to load control tower data');
@@ -86,6 +97,39 @@ export const OperationsProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     } catch (err: any) {
       console.error('Failed to generate schedule', err);
       setError(err.response?.data?.detail || 'Failed to generate schedule');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const resetSchedule = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await apiClient.post('/schedule/reset');
+      setLiveBannerMessage(res.data.message || 'Schedule reset to clean original baseline.');
+      await loadDashboardData();
+    } catch (err: any) {
+      console.error('Failed to reset schedule', err);
+      setError(err.response?.data?.detail || 'Failed to reset schedule');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const reinstateInterview = async (studentId: string, companyId: string) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await apiClient.post('/schedule/reinstate-interview', {
+        student_id: studentId,
+        company_id: companyId
+      });
+      setLiveBannerMessage(res.data.message || 'Interview scheduled successfully.');
+      await loadDashboardData();
+    } catch (err: any) {
+      console.error('Failed to schedule/reinstate interview', err);
+      setError(err.response?.data?.detail || 'Failed to schedule interview');
     } finally {
       setIsLoading(false);
     }
@@ -146,8 +190,9 @@ export const OperationsProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             if (data.message) {
               setLiveBannerMessage(data.message);
             }
-            // Real-time background sync without page refresh
+            // Real-time background sync across all views and portals
             loadDashboardData();
+            setSyncCounter((prev) => prev + 1);
           } catch (e) {
             console.error('Error parsing WS event', e);
           }
@@ -194,8 +239,12 @@ export const OperationsProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         isLiveConnected,
         lastSyncTime,
         liveBannerMessage,
+        syncCounter,
+        triggerSync,
         loadDashboardData,
         generateSchedule,
+        resetSchedule,
+        reinstateInterview,
         setSelectedInterview,
         setIsCopilotOpen,
         setIsDisruptionModalOpen,

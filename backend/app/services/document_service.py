@@ -12,7 +12,9 @@ from app.models.document import Document, DocumentVersion, DocumentImport, Docum
 from app.models.student import Student
 from app.models.company import Company, CompanyRequirements, CompanyAvailability, Shortlist
 from app.models.resource import Room, Panel
+from app.models.schedule import Schedule, ScheduleVersion, Interview
 from app.models.user import User
+from app.core.security import get_password_hash
 
 CATEGORIES = [
     "Students",
@@ -40,10 +42,6 @@ COLUMN_KEYWORDS = {
 }
 
 def get_field(row: Dict[str, Any], *aliases: str) -> Optional[str]:
-    """
-    Extracts a value from a row dictionary matching any of the provided field aliases,
-    case-insensitively, ignoring spaces and underscores.
-    """
     normalized_row = {
         k.strip().lower().replace(" ", "_"): (str(v).strip() if v is not None else "")
         for k, v in row.items() if k
@@ -79,7 +77,7 @@ class DocumentService:
                 for _, row in df.iterrows():
                     clean_row = {str(k).strip(): str(v).strip() for k, v in row.items()}
                     rows.append(clean_row)
-            except Exception as e:
+            except Exception:
                 text = content.decode("utf-8", errors="ignore")
                 lines = [l for l in text.splitlines() if l.strip()]
                 if lines:
@@ -122,7 +120,8 @@ class DocumentService:
         db: Session,
         document_type: str,
         columns: List[str],
-        rows: List[Dict[str, Any]]
+        rows: List[Dict[str, Any]],
+        placement_session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         errors: List[Dict[str, Any]] = []
         valid_count = 0
@@ -138,101 +137,37 @@ class DocumentService:
             if document_type == "Companies":
                 c_id = get_field(row, "company_id", "company_code", "company_key", "id", "code")
                 c_name = get_field(row, "company_name", "name", "title")
-                industry = get_field(row, "industry", "sector", "domain")
                 email = get_field(row, "email", "contact_email", "hr_email", "email_address")
-                interview_date = get_field(row, "interview_date", "date", "date_of_interview")
-                available_from = get_field(row, "available_from", "start_time", "from_time")
-                available_to = get_field(row, "available_to", "end_time", "to_time")
                 duration = get_field(row, "interview_duration_minutes", "interview_duration_mins", "duration", "duration_mins")
 
                 if not c_name:
-                    row_errors.append({
-                        "col": "company_name",
-                        "type": "MISSING_VALUE",
-                        "msg": "Company name is required",
-                        "raw": ""
-                    })
+                    row_errors.append({"col": "company_name", "type": "MISSING_VALUE", "msg": "Company name is required", "raw": ""})
 
                 if c_id:
                     if c_id in seen_keys:
-                        row_errors.append({
-                            "col": "company_id",
-                            "type": "DUPLICATE",
-                            "msg": f"Duplicate company identifier: '{c_id}'",
-                            "raw": c_id
-                        })
+                        row_errors.append({"col": "company_id", "type": "DUPLICATE", "msg": f"Duplicate company identifier: '{c_id}'", "raw": c_id})
                     else:
                         seen_keys.add(c_id)
 
-                if email:
-                    if not email_regex.match(email):
-                        row_errors.append({
-                            "col": "email",
-                            "type": "INVALID_EMAIL",
-                            "msg": f"Invalid email format: '{email}'",
-                            "raw": email
-                        })
-
-                if interview_date:
-                    try:
-                        datetime.strptime(interview_date, "%Y-%m-%d")
-                    except ValueError:
-                        row_errors.append({
-                            "col": "interview_date",
-                            "type": "INVALID_DATE_FORMAT",
-                            "msg": f"Interview date must be in YYYY-MM-DD format, got '{interview_date}'",
-                            "raw": interview_date
-                        })
-
-                if available_from:
-                    try:
-                        parts = available_from.split(":")
-                        if len(parts) != 2 or not (0 <= int(parts[0]) <= 23 and 0 <= int(parts[1]) <= 59):
-                            raise ValueError()
-                    except Exception:
-                        row_errors.append({
-                            "col": "available_from",
-                            "type": "INVALID_TIME_FORMAT",
-                            "msg": f"Available from time must be in HH:MM format, got '{available_from}'",
-                            "raw": available_from
-                        })
-
-                if available_to:
-                    try:
-                        parts = available_to.split(":")
-                        if len(parts) != 2 or not (0 <= int(parts[0]) <= 23 and 0 <= int(parts[1]) <= 59):
-                            raise ValueError()
-                    except Exception:
-                        row_errors.append({
-                            "col": "available_to",
-                            "type": "INVALID_TIME_FORMAT",
-                            "msg": f"Available to time must be in HH:MM format, got '{available_to}'",
-                            "raw": available_to
-                        })
+                if email and not email_regex.match(email):
+                    row_errors.append({"col": "email", "type": "INVALID_EMAIL", "msg": f"Invalid email format: '{email}'", "raw": email})
 
                 if duration:
                     try:
-                        dur_val = int(duration)
-                        if dur_val <= 0:
+                        if int(duration) <= 0:
                             raise ValueError()
                     except ValueError:
-                        row_errors.append({
-                            "col": "interview_duration_minutes",
-                            "type": "INVALID_INTEGER",
-                            "msg": f"Interview duration must be a positive integer, got '{duration}'",
-                            "raw": duration
-                        })
+                        row_errors.append({"col": "interview_duration_minutes", "type": "INVALID_INTEGER", "msg": f"Interview duration must be a positive integer, got '{duration}'", "raw": duration})
 
             elif document_type == "Students":
                 name = get_field(row, "name", "student_name", "full_name")
                 email = get_field(row, "email", "student_email", "email_address")
                 branch = get_field(row, "branch", "department", "stream", "course")
                 cgpa_str = get_field(row, "cgpa", "gpa", "score")
-                code = get_field(row, "student_code", "student_id", "usn", "roll_no", "id", "code")
 
                 if not name:
                     row_errors.append({"col": "name", "type": "MISSING_VALUE", "msg": "Student name is required", "raw": ""})
-                
+
                 if not email:
                     row_errors.append({"col": "email", "type": "MISSING_VALUE", "msg": "Student email is required", "raw": ""})
                 elif not email_regex.match(email):
@@ -284,15 +219,14 @@ class DocumentService:
 
                 if capacity:
                     try:
-                        cap_val = int(capacity)
-                        if cap_val <= 0:
+                        if int(capacity) <= 0:
                             raise ValueError()
                     except ValueError:
                         row_errors.append({"col": "capacity", "type": "INVALID_INTEGER", "msg": f"Capacity must be a positive integer, got '{capacity}'", "raw": capacity})
 
             elif document_type == "Panels":
-                panel_code = get_field(row, "panel_code", "panel_id", "panel_name", "panel", "panel_no", "panel_num", "panel_number", "code", "id", "name")
-                comp_code = get_field(row, "company_code", "company_id", "company_name", "company", "comp_code", "comp_id", "recruiter", "firm", "corporate")
+                panel_code = get_field(row, "panel_code", "panel_id", "panel_name", "panel", "panel_no", "panel_num", "code", "id", "name")
+                comp_code = get_field(row, "company_code", "company_id", "company_name", "company", "comp_code", "comp_id")
 
                 if not panel_code:
                     row_errors.append({"col": "panel_code", "type": "MISSING_VALUE", "msg": "Panel code is required", "raw": ""})
@@ -303,16 +237,6 @@ class DocumentService:
                         row_errors.append({"col": "panel_code", "type": "DUPLICATE", "msg": f"Duplicate panel '{panel_code}' for company '{comp_code or 'general'}'", "raw": panel_code})
                     else:
                         seen_keys.add(panel_key)
-
-            elif document_type == "Company Availability":
-                comp_code = get_field(row, "company_code", "company_id", "company_name", "company", "comp_code", "comp_id", "recruiter", "firm")
-                if not comp_code:
-                    row_errors.append({"col": "company_code", "type": "MISSING_VALUE", "msg": "Company code is required", "raw": ""})
-
-            elif document_type == "Student Availability":
-                stud_code = get_field(row, "student_code", "student_id", "usn", "roll_no", "student_name", "student", "code", "id")
-                if not stud_code:
-                    row_errors.append({"col": "student_code", "type": "MISSING_VALUE", "msg": "Student code is required", "raw": ""})
 
             if row_errors:
                 error_count += 1
@@ -340,20 +264,20 @@ class DocumentService:
     def compare_and_diff(
         db: Session,
         document_id: str,
-        rows: List[Dict[str, Any]]
+        rows: List[Dict[str, Any]],
+        placement_session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         doc = db.query(Document).get(document_id)
-        if not doc:
-            return {"added": len(rows), "updated": 0, "removed": 0, "unchanged": 0}
+        doc_type = doc.document_type if doc else "Other"
+        sess_id = placement_session_id or (doc.placement_session_id if doc else None)
 
-        doc_type = doc.document_type
-        added = 0
-        updated = 0
-        removed = 0
-        unchanged = 0
+        added, updated, removed, unchanged = 0, 0, 0, 0
 
         if doc_type == "Students":
-            existing = {s.student_code: s for s in db.query(Student).all()}
+            q = db.query(Student)
+            if sess_id:
+                q = q.filter(Student.placement_session_id == sess_id)
+            existing = {s.student_code: s for s in q.all()}
             incoming_codes = set()
             for idx, r in enumerate(rows, start=1):
                 code = get_field(r, "student_code", "student_id", "usn", "roll_no", "id", "code") or f"S{idx:04d}"
@@ -366,7 +290,10 @@ class DocumentService:
             unchanged = max(0, len(existing) - updated - removed)
 
         elif doc_type == "Companies":
-            existing = {c.company_code: c for c in db.query(Company).all()}
+            q = db.query(Company)
+            if sess_id:
+                q = q.filter(Company.placement_session_id == sess_id)
+            existing = {c.company_code: c for c in q.all()}
             incoming_codes = set()
             for idx, r in enumerate(rows, start=1):
                 code = get_field(r, "company_id", "company_code", "company_key", "id", "code") or f"C{idx:02d}"
@@ -379,14 +306,15 @@ class DocumentService:
             unchanged = max(0, len(existing) - updated - removed)
 
         elif doc_type == "Panels":
-            existing = {f"{p.company_id}_{p.panel_code}": p for p in db.query(Panel).all()}
+            q = db.query(Panel)
+            if sess_id:
+                q = q.filter(Panel.placement_session_id == sess_id)
+            existing = {p.panel_code: p for p in q.all()}
             incoming_codes = set()
             for idx, r in enumerate(rows, start=1):
-                p_code = get_field(r, "panel_code", "panel_id", "panel_name", "panel", "panel_no", "panel_num", "panel_number", "code", "id", "name") or f"P{idx}"
-                c_code = get_field(r, "company_code", "company_id", "company_name", "company", "comp_code", "comp_id", "recruiter", "firm", "corporate") or ""
-                key = f"{c_code}_{p_code}" if c_code else p_code
-                incoming_codes.add(key)
-                if key in existing or p_code in [p.panel_code for p in existing.values()]:
+                p_code = get_field(r, "panel_id", "panel_code", "panel_name", "panel", "panel_no", "panel_num", "code", "id") or f"P{idx:02d}"
+                incoming_codes.add(p_code)
+                if p_code in existing:
                     updated += 1
                 else:
                     added += 1
@@ -394,7 +322,10 @@ class DocumentService:
             unchanged = max(0, len(existing) - updated - removed)
 
         elif doc_type == "Rooms":
-            existing = {r.room_code: r for r in db.query(Room).all()}
+            q = db.query(Room)
+            if sess_id:
+                q = q.filter(Room.placement_session_id == sess_id)
+            existing = {r.room_code: r for r in q.all()}
             incoming_codes = set()
             for idx, r in enumerate(rows, start=1):
                 code = get_field(r, "room_code", "room_id", "room", "name", "room_name") or f"R{idx:02d}"
@@ -417,32 +348,229 @@ class DocumentService:
         }
 
     @staticmethod
-    def persist_imported_data(db: Session, document_type: str, rows: List[Dict[str, Any]]) -> int:
+    def time_str_to_slot(time_str: Optional[str]) -> int:
+        if not time_str:
+            return 0
+        try:
+            parts = str(time_str).strip().split(":")
+            h = int(parts[0])
+            m = int(parts[1]) if len(parts) > 1 else 0
+            mins_from_9 = (h - 9) * 60 + m
+            return max(0, min(12, int(mins_from_9 // 45)))
+        except Exception:
+            return 0
+
+    @staticmethod
+    def parse_tier(tier_str: Optional[str]) -> int:
+        if not tier_str:
+            return 1
+        ts = str(tier_str).strip().lower()
+        if "1" in ts or "mass" in ts or "tier 1" in ts or "tier-1" in ts:
+            return 1
+        if "2" in ts or "tier 2" in ts or "tier-2" in ts:
+            return 2
+        if "3" in ts or "tier 3" in ts or "tier-3" in ts:
+            return 3
+        try:
+            val = int(ts)
+            return max(1, min(3, val))
+        except ValueError:
+            return 1
+
+    @staticmethod
+    def clear_existing_schedules_for_session(db: Session, placement_session_id: str):
+        """Purges any existing schedules for a session when a dataset is replaced."""
+        scheds = db.query(Schedule).filter(Schedule.placement_session_id == placement_session_id).all()
+        for s in scheds:
+            versions = db.query(ScheduleVersion).filter(ScheduleVersion.schedule_id == s.id).all()
+            for v in versions:
+                db.query(Interview).filter(Interview.schedule_version_id == v.id).delete(synchronize_session=False)
+            db.query(ScheduleVersion).filter(ScheduleVersion.schedule_id == s.id).delete(synchronize_session=False)
+        db.query(Schedule).filter(Schedule.placement_session_id == placement_session_id).delete(synchronize_session=False)
+        db.flush()
+
+    @staticmethod
+    def persist_imported_data(
+        db: Session,
+        document_type: str,
+        rows: List[Dict[str, Any]],
+        placement_session_id: str,
+        import_mode: str = "REPLACE" # REPLACE, APPEND, UPDATE
+    ) -> int:
         persisted_count = 0
-        
-        if document_type == "Panels":
-            all_companies = db.query(Company).order_by(Company.company_code.asc()).all()
-            uploaded_codes = set()
+        mode = (import_mode or "REPLACE").upper()
+
+        if mode == "REPLACE":
+            DocumentService.clear_existing_schedules_for_session(db, placement_session_id)
+
+            if document_type == "Students":
+                db.query(Student).filter(Student.placement_session_id == placement_session_id).delete(synchronize_session=False)
+            elif document_type == "Companies":
+                db.query(CompanyRequirements).filter(CompanyRequirements.placement_session_id == placement_session_id).delete(synchronize_session=False)
+                db.query(CompanyAvailability).filter(CompanyAvailability.placement_session_id == placement_session_id).delete(synchronize_session=False)
+                db.query(Company).filter(Company.placement_session_id == placement_session_id).delete(synchronize_session=False)
+            elif document_type == "Rooms":
+                db.query(Room).filter(Room.placement_session_id == placement_session_id).delete(synchronize_session=False)
+            elif document_type == "Panels":
+                db.query(Panel).filter(Panel.placement_session_id == placement_session_id).delete(synchronize_session=False)
+            elif document_type == "Shortlists":
+                db.query(Shortlist).filter(Shortlist.placement_session_id == placement_session_id).delete(synchronize_session=False)
+            db.flush()
+
+        if document_type == "Companies":
+            company_pwd_hash = get_password_hash("company123")
             for idx, r in enumerate(rows, start=1):
-                p_code = get_field(r, "panel_code", "panel_id", "panel_name", "panel", "panel_no", "panel_num", "panel_number", "code", "id", "name") or f"P{idx:02d}"
-                uploaded_codes.add(p_code)
-                c_code = get_field(r, "company_code", "company_id", "company_name", "company", "comp_code", "comp_id", "recruiter", "firm", "corporate")
-                interviewers = get_field(r, "interviewer_names", "interviewer_name", "interviewers", "interviewer", "members", "names", "panelists") or f"Panel {p_code}"
+                c_code = get_field(r, "company_id", "company_code", "company_key", "id", "code") or f"C{idx:02d}"
+                c_name = get_field(r, "company_name", "name", "title") or f"Company {c_code}"
+                industry = get_field(r, "industry", "sector", "domain") or "Technology"
+                email = get_field(r, "email", "contact_email", "hr_email", "email_address") or f"{c_code.lower()}@placement.edu"
+                
+                tier_raw = get_field(r, "tier", "priority_tier", "priority")
+                priority_tier = DocumentService.parse_tier(tier_raw)
+
+                duration_raw = get_field(r, "interview_duration_minutes", "interview_duration_mins", "duration", "duration_mins")
+                duration_mins = int(duration_raw) if duration_raw and duration_raw.isdigit() else 45
+
+                panel_count_raw = get_field(r, "panel_count", "max_panels", "panels")
+                max_panels = int(panel_count_raw) if panel_count_raw and panel_count_raw.isdigit() else 4
+
+                min_cgpa_raw = get_field(r, "min_cgpa", "cgpa_cutoff", "cutoff_cgpa", "cgpa")
+                min_cgpa = float(min_cgpa_raw) if min_cgpa_raw else 6.0
+
+                c_user = db.query(User).filter(User.email == email).first()
+                if not c_user:
+                    c_user = User(
+                        id=str(uuid.uuid4()),
+                        email=email,
+                        hashed_password=company_pwd_hash,
+                        role="COMPANY",
+                        is_active=True
+                    )
+                    db.add(c_user)
+                    db.flush()
+
+                comp = None
+                if mode != "REPLACE":
+                    comp = db.query(Company).filter(
+                        Company.placement_session_id == placement_session_id,
+                        (Company.company_code == c_code) | (Company.name == c_name)
+                    ).first()
+
+                if comp:
+                    comp.company_code = c_code
+                    comp.name = c_name
+                    comp.industry = industry
+                    comp.priority_tier = priority_tier
+                    comp.interview_duration_mins = duration_mins
+                    comp.max_panels = max_panels
+                    comp.user_id = c_user.id
+                else:
+                    comp = Company(
+                        id=str(uuid.uuid4()),
+                        placement_session_id=placement_session_id,
+                        user_id=c_user.id,
+                        company_code=c_code,
+                        name=c_name,
+                        industry=industry,
+                        priority_tier=priority_tier,
+                        interview_duration_mins=duration_mins,
+                        max_panels=max_panels
+                    )
+                    db.add(comp)
+                    db.flush()
+
+                # CompanyRequirements
+                req = db.query(CompanyRequirements).filter(
+                    CompanyRequirements.placement_session_id == placement_session_id,
+                    CompanyRequirements.company_id == comp.id
+                ).first()
+                if not req:
+                    req = CompanyRequirements(
+                        id=str(uuid.uuid4()),
+                        placement_session_id=placement_session_id,
+                        company_id=comp.id,
+                        min_cgpa=min_cgpa,
+                        eligible_branches=json.dumps([]),
+                        rounds_count=1
+                    )
+                    db.add(req)
+                else:
+                    req.min_cgpa = min_cgpa
+
+                persisted_count += 1
+
+        elif document_type == "Company Availability":
+            for idx, r in enumerate(rows, start=1):
+                c_code = get_field(r, "company_id", "company_code", "company_name", "company", "comp_code", "comp_id")
+                if not c_code:
+                    continue
+                comp = db.query(Company).filter(
+                    Company.placement_session_id == placement_session_id,
+                    (Company.company_code == c_code) | (Company.id == c_code) | (Company.name.ilike(c_code))
+                ).first()
+                if not comp:
+                    continue
+                
+                start_str = get_field(r, "available_from", "start_time", "from_time") or "09:00"
+                end_str = get_field(r, "available_to", "end_time", "to_time") or "18:00"
+                
+                start_slot = DocumentService.time_str_to_slot(start_str)
+                end_slot = DocumentService.time_str_to_slot(end_str)
+                if end_slot <= start_slot:
+                    end_slot = min(12, start_slot + 4)
+
+                avail = db.query(CompanyAvailability).filter(
+                    CompanyAvailability.placement_session_id == placement_session_id,
+                    CompanyAvailability.company_id == comp.id
+                ).first()
+                if avail:
+                    avail.start_time_slot = start_slot
+                    avail.end_time_slot = end_slot
+                    avail.is_available = True
+                else:
+                    avail = CompanyAvailability(
+                        id=str(uuid.uuid4()),
+                        placement_session_id=placement_session_id,
+                        company_id=comp.id,
+                        day_number=1,
+                        start_time_slot=start_slot,
+                        end_time_slot=end_slot,
+                        is_available=True
+                    )
+                    db.add(avail)
+                persisted_count += 1
+
+        elif document_type == "Panels":
+            all_companies = db.query(Company).filter(Company.placement_session_id == placement_session_id).order_by(Company.company_code.asc()).all()
+            for idx, r in enumerate(rows, start=1):
+                p_code = get_field(r, "panel_id", "panel_code", "panel_name", "panel", "panel_no", "panel_num", "code", "id") or f"P{idx:02d}"
+                c_code = get_field(r, "company_code", "company_id", "company_name", "company", "comp_code", "comp_id")
+                interviewers = get_field(r, "interviewer_names", "interviewer_name", "interviewers", "interviewer", "lead", "panel_name", "specialization", "names") or f"Panel {p_code}"
                 
                 comp = None
                 if c_code:
-                    comp = db.query(Company).filter((Company.company_code.ilike(c_code)) | (Company.id == c_code) | (Company.name.ilike(c_code))).first()
+                    comp = db.query(Company).filter(
+                        Company.placement_session_id == placement_session_id,
+                        (Company.company_code.ilike(c_code)) | (Company.id == c_code) | (Company.name.ilike(c_code))
+                    ).first()
                 if not comp and all_companies:
                     comp = all_companies[(idx - 1) % len(all_companies)]
-                
+
                 if comp:
-                    panel = db.query(Panel).filter(Panel.panel_code == p_code).first()
+                    panel = None
+                    if mode != "REPLACE":
+                        panel = db.query(Panel).filter(
+                            Panel.placement_session_id == placement_session_id,
+                            Panel.panel_code == p_code
+                        ).first()
+
                     if panel:
                         panel.interviewer_names = interviewers
                         panel.company_id = comp.id
                     else:
                         panel = Panel(
                             id=str(uuid.uuid4()),
+                            placement_session_id=placement_session_id,
                             company_id=comp.id,
                             panel_code=p_code,
                             interviewer_names=interviewers,
@@ -450,14 +578,10 @@ class DocumentService:
                         )
                         db.add(panel)
                     persisted_count += 1
-            if uploaded_codes:
-                db.query(Panel).filter(Panel.panel_code.notin_(uploaded_codes)).delete(synchronize_session=False)
 
         elif document_type == "Rooms":
-            uploaded_codes = set()
             for idx, r in enumerate(rows, start=1):
-                r_code = get_field(r, "room_code", "room_id", "room", "name", "room_name") or f"R{idx:02d}"
-                uploaded_codes.add(r_code)
+                r_code = get_field(r, "room_id", "room_code", "room", "name", "room_name") or f"R{idx:02d}"
                 building = get_field(r, "building", "block", "location") or "Placement Complex"
                 floor_str = get_field(r, "floor", "level") or "1"
                 cap_str = get_field(r, "capacity", "seats", "size") or "10"
@@ -471,7 +595,13 @@ class DocumentService:
                 except ValueError:
                     cap_val = 10
 
-                room = db.query(Room).filter(Room.room_code == r_code).first()
+                room = None
+                if mode != "REPLACE":
+                    room = db.query(Room).filter(
+                        Room.placement_session_id == placement_session_id,
+                        Room.room_code == r_code
+                    ).first()
+
                 if room:
                     room.building = building
                     room.floor = floor_val
@@ -479,6 +609,7 @@ class DocumentService:
                 else:
                     room = Room(
                         id=str(uuid.uuid4()),
+                        placement_session_id=placement_session_id,
                         room_code=r_code,
                         building=building,
                         floor=floor_val,
@@ -487,53 +618,13 @@ class DocumentService:
                     )
                     db.add(room)
                 persisted_count += 1
-            if uploaded_codes:
-                db.query(Room).filter(Room.room_code.notin_(uploaded_codes)).delete(synchronize_session=False)
-
-        elif document_type == "Companies":
-            uploaded_codes = set()
-            for idx, r in enumerate(rows, start=1):
-                c_code = get_field(r, "company_id", "company_code", "company_key", "id", "code") or f"C{idx:02d}"
-                uploaded_codes.add(c_code)
-                c_name = get_field(r, "company_name", "name", "title") or f"Company {c_code}"
-                industry = get_field(r, "industry", "sector", "domain") or "Technology"
-                email = get_field(r, "email", "contact_email", "hr_email", "email_address") or f"hr_{c_code.lower()}@example.com"
-                
-                comp = db.query(Company).filter((Company.company_code == c_code) | (Company.name == c_name)).first()
-                if comp:
-                    comp.name = c_name
-                    comp.industry = industry
-                else:
-                    user = db.query(User).filter(User.email == email).first()
-                    if not user:
-                        user = User(
-                            id=str(uuid.uuid4()),
-                            email=email,
-                            role="COMPANY",
-                            hashed_password="hash"
-                        )
-                        db.add(user)
-                        db.flush()
-                    comp = Company(
-                        id=str(uuid.uuid4()),
-                        user_id=user.id,
-                        company_code=c_code,
-                        name=c_name,
-                        industry=industry,
-                        priority_tier=1
-                    )
-                    db.add(comp)
-                persisted_count += 1
-            if uploaded_codes:
-                db.query(Company).filter(Company.company_code.notin_(uploaded_codes)).delete(synchronize_session=False)
 
         elif document_type == "Students":
-            uploaded_codes = set()
+            student_pwd_hash = get_password_hash("student123")
             for idx, r in enumerate(rows, start=1):
-                s_code = get_field(r, "student_code", "student_id", "usn", "roll_no", "id", "code") or f"S{idx:04d}"
-                uploaded_codes.add(s_code)
+                s_code = get_field(r, "student_id", "student_code", "usn", "roll_no", "id", "code") or f"S{idx:04d}"
                 s_name = get_field(r, "name", "student_name", "full_name") or f"Student {s_code}"
-                s_email = get_field(r, "email", "student_email", "email_address") or f"{s_code.lower()}@univ.edu"
+                s_email = get_field(r, "email", "student_email", "email_address") or f"{s_code.lower()}@student.edu"
                 branch = get_field(r, "branch", "department", "stream", "course") or "CSE"
                 cgpa_str = get_field(r, "cgpa", "gpa", "score") or "7.5"
                 try:
@@ -541,25 +632,37 @@ class DocumentService:
                 except ValueError:
                     cgpa_val = 7.5
 
-                stud = db.query(Student).filter((Student.student_code == s_code) | (Student.email == s_email)).first()
+                s_user = db.query(User).filter(User.email == s_email).first()
+                if not s_user:
+                    s_user = User(
+                        id=str(uuid.uuid4()),
+                        email=s_email,
+                        hashed_password=student_pwd_hash,
+                        role="STUDENT",
+                        is_active=True
+                    )
+                    db.add(s_user)
+                    db.flush()
+
+                stud = None
+                if mode != "REPLACE":
+                    stud = db.query(Student).filter(
+                        Student.placement_session_id == placement_session_id,
+                        (Student.student_code == s_code) | (Student.email == s_email)
+                    ).first()
+
                 if stud:
                     stud.name = s_name
+                    stud.student_code = s_code
+                    stud.email = s_email
                     stud.branch = branch
                     stud.cgpa = cgpa_val
+                    stud.user_id = s_user.id
                 else:
-                    user = db.query(User).filter(User.email == s_email).first()
-                    if not user:
-                        user = User(
-                            id=str(uuid.uuid4()),
-                            email=s_email,
-                            role="STUDENT",
-                            hashed_password="hash"
-                        )
-                        db.add(user)
-                        db.flush()
                     stud = Student(
                         id=str(uuid.uuid4()),
-                        user_id=user.id,
+                        placement_session_id=placement_session_id,
+                        user_id=s_user.id,
                         student_code=s_code,
                         name=s_name,
                         email=s_email,
@@ -568,13 +671,11 @@ class DocumentService:
                     )
                     db.add(stud)
                 persisted_count += 1
-            if uploaded_codes:
-                db.query(Student).filter(Student.student_code.notin_(uploaded_codes)).delete(synchronize_session=False)
 
         elif document_type == "Shortlists":
             for idx, r in enumerate(rows, start=1):
-                c_code = get_field(r, "company_code", "company_id", "company", "comp_code", "comp_id")
-                s_code = get_field(r, "student_code", "student_id", "student", "usn", "roll_no")
+                c_code = get_field(r, "company_code", "company_id", "company", "comp_code", "comp_id", "company_name")
+                s_code = get_field(r, "student_code", "student_id", "student", "usn", "roll_no", "student_name", "email")
                 rank_str = get_field(r, "preference_rank", "rank", "priority") or "1"
                 try:
                     rank_val = int(rank_str)
@@ -582,20 +683,48 @@ class DocumentService:
                     rank_val = 1
 
                 if c_code and s_code:
-                    comp = db.query(Company).filter((Company.company_code == c_code) | (Company.id == c_code)).first()
-                    stud = db.query(Student).filter((Student.student_code == s_code) | (Student.id == s_code)).first()
+                    comp = db.query(Company).filter(
+                        Company.placement_session_id == placement_session_id,
+                        (Company.company_code.ilike(c_code)) | (Company.id == c_code) | (Company.name.ilike(c_code))
+                    ).first()
+                    if not comp:
+                        comp = db.query(Company).filter(
+                            Company.placement_session_id == placement_session_id,
+                            Company.company_code.ilike(f"%{c_code}%")
+                        ).first()
+
+                    stud = db.query(Student).filter(
+                        Student.placement_session_id == placement_session_id,
+                        (Student.student_code.ilike(s_code)) | (Student.id == s_code) | (Student.email.ilike(s_code)) | (Student.name.ilike(s_code))
+                    ).first()
+                    if not stud:
+                        stud = db.query(Student).filter(
+                            Student.placement_session_id == placement_session_id,
+                            Student.student_code.ilike(f"%{s_code}%")
+                        ).first()
+
                     if comp and stud:
-                        sh = db.query(Shortlist).filter(Shortlist.company_id == comp.id, Shortlist.student_id == stud.id).first()
-                        if not sh:
+                        sh = None
+                        if mode != "REPLACE":
+                            sh = db.query(Shortlist).filter(
+                                Shortlist.placement_session_id == placement_session_id,
+                                Shortlist.company_id == comp.id,
+                                Shortlist.student_id == stud.id
+                            ).first()
+
+                        if sh:
+                            sh.preference_rank = rank_val
+                        else:
                             sh = Shortlist(
                                 id=str(uuid.uuid4()),
+                                placement_session_id=placement_session_id,
                                 company_id=comp.id,
                                 student_id=stud.id,
                                 preference_rank=rank_val,
                                 status="SHORTLISTED"
                             )
                             db.add(sh)
-                            persisted_count += 1
+                        persisted_count += 1
 
         db.flush()
         return persisted_count

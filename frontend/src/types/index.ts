@@ -86,11 +86,18 @@ export interface Shortlist {
 }
 
 export interface InterviewAuditMetadata {
-  constraint_checks: Record<string, boolean>;
-  optimization_reasons: string[];
-  rejected_alternatives: Array<{ slot: string; reason: string }>;
+  constraint_checks?: Record<string, boolean>;
+  optimization_reasons?: string[];
+  rejected_alternatives?: Array<{ slot: string; reason: string }>;
   replan_reason?: string;
   strategy_applied?: string;
+  assignment_reason?: string;
+  cancellation_reason?: string;
+  comment?: string;
+  cancelled_by_role?: string;
+  candidate_score?: number;
+  candidate_rank?: number;
+  [key: string]: any;
 }
 
 export interface Interview {

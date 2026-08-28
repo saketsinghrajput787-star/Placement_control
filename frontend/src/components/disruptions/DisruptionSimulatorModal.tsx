@@ -4,17 +4,23 @@ import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { Company } from '../../types';
 import { apiClient } from '../../api/client';
-import { ShieldAlert, AlertTriangle, Play, Sparkles } from 'lucide-react';
+import { ShieldAlert, AlertTriangle, Play, Sparkles, Check } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export const DisruptionSimulatorModal: React.FC = () => {
-  const { isDisruptionModalOpen, setIsDisruptionModalOpen, setReplanningResult } = useOperations();
+  const {
+    isDisruptionModalOpen,
+    setIsDisruptionModalOpen,
+    setReplanningResult,
+    applyReplanningStrategy,
+    loadDashboardData
+  } = useOperations();
   const navigate = useNavigate();
 
   const [companies, setCompanies] = useState<Company[]>([]);
   const [eventType, setEventType] = useState('COMPANY_DELAY');
   const [selectedCompanyId, setSelectedCompanyId] = useState('');
-  const [delaySlots, setDelaySlots] = useState(3);
+  const [delaySlots, setDelaySlots] = useState(2);
   const [withdrawnCount, setWithdrawnCount] = useState(15);
   const [reason, setReason] = useState('Recruiter flight delay & panel hardware fault');
   const [isSimulating, setIsSimulating] = useState(false);
@@ -50,6 +56,26 @@ export const DisruptionSimulatorModal: React.FC = () => {
     }
   };
 
+  const handleDirectApply = async () => {
+    if (!simulationPreview) return;
+    setIsSimulating(true);
+    try {
+      const replanRes = await apiClient.post('/replanning/run', {
+        disruption_id: simulationPreview.disruption_id,
+      });
+      const replanData = replanRes.data;
+      const bestStrategy = replanData.recommended_strategy || replanData.selected_strategy || 'BALANCED';
+      await applyReplanningStrategy(replanData.replanning_run_id, bestStrategy);
+      setIsDisruptionModalOpen(false);
+      setSimulationPreview(null);
+      await loadDashboardData();
+    } catch (e: any) {
+      alert(e.response?.data?.detail || 'Failed to apply recovery plan');
+    } finally {
+      setIsSimulating(false);
+    }
+  };
+
   const handleProceedToReplanning = async () => {
     if (!simulationPreview) return;
     setIsSimulating(true);
@@ -75,7 +101,7 @@ export const DisruptionSimulatorModal: React.FC = () => {
         setSimulationPreview(null);
       }}
       title="Disruption Simulator & Operational Replanner"
-      subtitle="Safely simulate recruiter delays, panel outages, and student withdrawals without altering live database"
+      subtitle="Safely simulate recruiter delays, panel outages, and student withdrawals without altering live database until applied"
       maxWidth="2xl"
     >
       <div className="space-y-5">
@@ -119,8 +145,8 @@ export const DisruptionSimulatorModal: React.FC = () => {
                 className="w-full bg-sand-50 border border-sand-300 rounded-md p-2 text-sand-900 focus:ring-1 focus:ring-forest-600"
               >
                 <option value={1}>1 Slot (45 mins)</option>
-                <option value={2}>2 Slots (1.5 hours)</option>
-                <option value={3}>3 Slots (2.25 hours) - Demo Preset</option>
+                <option value={2}>2 Slots (1.5 hours) - Demo Preset</option>
+                <option value={3}>3 Slots (2.25 hours)</option>
                 <option value={4}>4 Slots (3.0 hours)</option>
               </select>
             </div>
@@ -190,7 +216,7 @@ export const DisruptionSimulatorModal: React.FC = () => {
               </div>
             </div>
 
-            <div className="pt-2 flex justify-end gap-2">
+            <div className="pt-2 flex flex-wrap items-center justify-end gap-2">
               <Button
                 variant="outline"
                 size="sm"
@@ -199,13 +225,22 @@ export const DisruptionSimulatorModal: React.FC = () => {
                 Reset
               </Button>
               <Button
-                variant="primary"
+                variant="accent"
                 size="sm"
                 icon={<Sparkles className="w-4 h-4" />}
                 onClick={handleProceedToReplanning}
                 isLoading={isSimulating}
               >
-                Generate 3 Multi-Recovery Strategies
+                Compare 5 Strategies
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                icon={<Check className="w-4 h-4" />}
+                onClick={handleDirectApply}
+                isLoading={isSimulating}
+              >
+                Apply Recovery Plan Directly
               </Button>
             </div>
           </div>
@@ -214,3 +249,4 @@ export const DisruptionSimulatorModal: React.FC = () => {
     </Modal>
   );
 };
+

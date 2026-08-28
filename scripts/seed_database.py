@@ -18,6 +18,9 @@ from app.models.student import Student
 from app.models.company import Company, CompanyRequirements, CompanyAvailability, Shortlist
 from app.models.resource import Room, Panel, InterviewSlot
 from app.models.schedule import Schedule
+from app.models.placement_session import PlacementSession
+
+DEFAULT_SESSION_ID = "default-placement-session-2026"
 
 BRANCHES = ["CSE", "ISE", "ECE", "EEE", "MECH", "CIVIL", "AI_ML"]
 SKILLS_POOL = [
@@ -62,10 +65,23 @@ def seed_database():
     company_pwd_hash = get_password_hash("company123")
     student_pwd_hash = get_password_hash("student123")
 
+    # 0. Create Active Placement Session
+    print("[*] Creating Placement Session...")
+    active_session = PlacementSession(
+        id=DEFAULT_SESSION_ID,
+        name="University Placement Week 2026",
+        college_name="University Placement Office",
+        academic_year="2025-2026",
+        status="ACTIVE"
+    )
+    db.add(active_session)
+    db.flush()
+
     # 1. Create Default Schedule
     print("[*] Creating Schedule...")
     default_schedule = Schedule(
         id=str(uuid.uuid4()),
+        placement_session_id=DEFAULT_SESSION_ID,
         name="University Placement Week 2026",
         academic_year="2025-2026",
         status="ACTIVE"
@@ -99,6 +115,7 @@ def seed_database():
     for i in range(1, 21):
         room = Room(
             id=str(uuid.uuid4()),
+            placement_session_id=DEFAULT_SESSION_ID,
             room_code=f"R{i:02d}",
             building="Placement Complex Block A" if i <= 10 else "Placement Complex Block B",
             floor=1 if i <= 10 else 2,
@@ -126,6 +143,7 @@ def seed_database():
 
         comp = Company(
             id=str(uuid.uuid4()),
+            placement_session_id=DEFAULT_SESSION_ID,
             user_id=c_user.id,
             company_code=c_def["code"],
             name=c_def["name"],
@@ -142,6 +160,7 @@ def seed_database():
         # Requirements
         req = CompanyRequirements(
             id=str(uuid.uuid4()),
+            placement_session_id=DEFAULT_SESSION_ID,
             company_id=comp.id,
             min_cgpa=c_def["cgpa"],
             eligible_branches=json.dumps(c_def["branches"]),
@@ -152,6 +171,7 @@ def seed_database():
         # Availability
         avail = CompanyAvailability(
             id=str(uuid.uuid4()),
+            placement_session_id=DEFAULT_SESSION_ID,
             company_id=comp.id,
             day_number=1,
             start_time_slot=0,
@@ -164,6 +184,7 @@ def seed_database():
         for p_idx in range(1, c_def["panels"] + 1):
             panel = Panel(
                 id=str(uuid.uuid4()),
+                placement_session_id=DEFAULT_SESSION_ID,
                 company_id=comp.id,
                 panel_code=f"P{p_idx}",
                 interviewer_names=f"{comp.name} Tech Panel {p_idx}",
@@ -190,6 +211,7 @@ def seed_database():
 
     demo_student = Student(
         id=str(uuid.uuid4()),
+        placement_session_id=DEFAULT_SESSION_ID,
         user_id=demo_s_user.id,
         student_code="S0421",
         name="Alex Mercer",
@@ -233,6 +255,7 @@ def seed_database():
 
         student = Student(
             id=str(uuid.uuid4()),
+            placement_session_id=DEFAULT_SESSION_ID,
             user_id=s_user.id,
             student_code=code,
             name=name,
@@ -258,6 +281,7 @@ def seed_database():
     for comp in top_comps:
         sh = Shortlist(
             id=str(uuid.uuid4()),
+            placement_session_id=DEFAULT_SESSION_ID,
             company_id=comp.id,
             student_id=demo_student.id,
             preference_rank=1,
@@ -278,6 +302,7 @@ def seed_database():
                 continue
             sh = Shortlist(
                 id=str(uuid.uuid4()),
+                placement_session_id=DEFAULT_SESSION_ID,
                 company_id=comp.id,
                 student_id=s.id,
                 preference_rank=random.randint(1, 3),
@@ -292,7 +317,7 @@ def seed_database():
     print("[*] Generating Initial Schedule Version via Google OR-Tools CP-SAT...")
     try:
         from app.services.schedule_service import ScheduleService
-        sched_res = ScheduleService.generate_initial_schedule(db, max_time_seconds=15)
+        sched_res = ScheduleService.generate_initial_schedule(db, placement_session_id=DEFAULT_SESSION_ID, max_time_seconds=15)
         print(f"[+] Initial Schedule Version {sched_res.get('version_number')} Generated: {sched_res.get('metrics', {}).get('scheduled_interviews', 0)} interviews scheduled.")
     except Exception as e:
         print(f"[!] Warning: Initial schedule generation skipped: {e}")

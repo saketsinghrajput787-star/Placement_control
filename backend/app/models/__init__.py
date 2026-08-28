@@ -1,4 +1,5 @@
 from app.db.session import Base
+from app.models.placement_session import PlacementSession
 from app.models.user import User, Coordinator
 from app.models.student import Student
 from app.models.company import Company, CompanyRequirements, CompanyAvailability, Shortlist
@@ -10,6 +11,7 @@ from app.models.cancellation import InterviewCancellation
 
 __all__ = [
     "Base",
+    "PlacementSession",
     "User",
     "Coordinator",
     "Student",

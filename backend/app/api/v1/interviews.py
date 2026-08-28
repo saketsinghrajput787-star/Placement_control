@@ -8,7 +8,7 @@ from app.models.user import User
 from app.models.student import Student
 from app.models.company import Company
 from app.models.schedule import Interview
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_current_session_id
 from app.services.event_service import EventService
 from app.services.cancellation_service import CancellationService
 
@@ -20,31 +20,41 @@ async def cancel_interview(
     reason: str = Body(..., embed=True),
     comment: Optional[str] = Body(None, embed=True),
     db: Session = Depends(get_db),
+    session_id: str = Depends(get_current_session_id),
     current_user: User = Depends(get_current_user)
 ):
-    interview = db.query(Interview).get(id)
+    interview = db.query(Interview).filter(
+        Interview.id == id,
+        Interview.placement_session_id == session_id
+    ).first()
     if not interview:
         raise HTTPException(status_code=404, detail="Interview not found")
 
-    # Security check: if student, can only cancel own interview
-    student = db.query(Student).filter(Student.user_id == current_user.id).first()
+    student = db.query(Student).filter(
+        Student.placement_session_id == session_id,
+        (Student.user_id == current_user.id) | (Student.email == current_user.email)
+    ).first()
     if current_user.role == "STUDENT":
         if not student or interview.student_id != student.id:
             raise HTTPException(status_code=403, detail="You can only cancel your own interviews")
 
     res = CancellationService.handle_student_cancellation(
         db=db,
+        placement_session_id=session_id,
         interview_id=id,
         reason=reason,
         comment=comment,
         current_user=current_user
     )
 
-    company = db.query(Company).get(interview.company_id)
+    company = db.query(Company).filter(
+        Company.id == interview.company_id,
+        Company.placement_session_id == session_id
+    ).first()
 
-    # Broadcast live WebSocket event to ALL portals
     await EventService.broadcast_live_event({
         "type": "STUDENT_CANCELLED",
+        "placement_session_id": session_id,
         "interview_id": interview.id,
         "student_id": interview.student_id,
         "student_code": res["cancelling_student_code"],

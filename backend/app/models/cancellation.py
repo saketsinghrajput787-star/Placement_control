@@ -7,10 +7,11 @@ class InterviewCancellation(Base):
     __tablename__ = "interview_cancellations"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    interview_id = Column(String(36), ForeignKey("interviews.id"), index=True, nullable=False)
-    schedule_version_id = Column(String(36), ForeignKey("schedule_versions.id"), index=True, nullable=False)
-    student_id = Column(String(36), ForeignKey("students.id"), index=True, nullable=False)
-    company_id = Column(String(36), ForeignKey("companies.id"), index=True, nullable=False)
+    placement_session_id = Column(String(36), ForeignKey("placement_sessions.id", ondelete="CASCADE"), index=True, nullable=True)
+    interview_id = Column(String(36), ForeignKey("interviews.id", ondelete="CASCADE"), index=True, nullable=False)
+    schedule_version_id = Column(String(36), ForeignKey("schedule_versions.id", ondelete="CASCADE"), index=True, nullable=False)
+    student_id = Column(String(36), ForeignKey("students.id", ondelete="CASCADE"), index=True, nullable=False)
+    company_id = Column(String(36), ForeignKey("companies.id", ondelete="CASCADE"), index=True, nullable=False)
     freed_room_id = Column(String(36), nullable=True)
     freed_panel_id = Column(String(36), nullable=True)
     slot_index = Column(Integer, nullable=False)

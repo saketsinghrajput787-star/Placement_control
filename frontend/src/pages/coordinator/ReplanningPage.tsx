@@ -3,7 +3,10 @@ import { useOperations } from '../../store/operationsStore';
 import { RecoveryStrategyTable } from '../../components/disruptions/RecoveryStrategyTable';
 import { ScheduleDiffView } from '../../components/disruptions/ScheduleDiffView';
 import { Button } from '../../components/common/Button';
-import { ShieldAlert, GitPullRequestDraft, CheckCircle2, Sparkles } from 'lucide-react';
+import { Modal } from '../../components/common/Modal';
+import { ShieldAlert, GitPullRequestDraft, CheckCircle2, Sparkles, AlertTriangle, ArrowRight } from 'lucide-react';
+import { RecoveryStrategyOption } from '../../types';
+import { useNavigate } from 'react-router-dom';
 
 export const ReplanningPage: React.FC = () => {
   const {
@@ -14,8 +17,10 @@ export const ReplanningPage: React.FC = () => {
     liveBannerMessage,
     isLoading
   } = useOperations();
+  const navigate = useNavigate();
   
   const [selectedStrategyType, setSelectedStrategyType] = useState<string | undefined>(undefined);
+  const [strategyToApply, setStrategyToApply] = useState<RecoveryStrategyOption | null>(null);
 
   const activeStrategy = replanningResult?.strategies_comparison.find(
     (s) => s.strategy_type === (selectedStrategyType || replanningResult.selected_strategy)
@@ -28,6 +33,15 @@ export const ReplanningPage: React.FC = () => {
     [];
 
   const isZeroDisplaced = replanningResult?.strategies_comparison.every((s) => s.moved_interviews === 0);
+
+  const handleConfirmApply = async () => {
+    if (!strategyToApply || !replanningResult) return;
+    const stratType = strategyToApply.strategy_type;
+    setStrategyToApply(null);
+    await applyReplanningStrategy(replanningResult.replanning_run_id, stratType);
+    navigate('/coordinator/dashboard');
+  };
+
 
   return (
     <div className="space-y-6">
@@ -114,9 +128,11 @@ export const ReplanningPage: React.FC = () => {
           {/* Recovery Strategy Comparison Table */}
           <RecoveryStrategyTable
             strategies={replanningResult.strategies_comparison}
-            onSelectStrategy={(strategyType) =>
-              applyReplanningStrategy(replanningResult.replanning_run_id, strategyType)
-            }
+            onSelectStrategy={(strategyType) => {
+              const strat = replanningResult.strategies_comparison.find(s => s.strategy_type === strategyType);
+              if (strat) setStrategyToApply(strat);
+              else applyReplanningStrategy(replanningResult.replanning_run_id, strategyType);
+            }}
             onViewSchedule={(strat) => setSelectedStrategyType(strat.strategy_type)}
             selectedStrategyType={activeStrategy?.strategy_type}
             isLoading={isLoading}
@@ -144,6 +160,69 @@ export const ReplanningPage: React.FC = () => {
             stabilityScore={activeStrategy?.stability_score ?? replanningResult.stability_score}
           />
         </div>
+      )}
+
+      {/* Confirmation Modal Before Applying Strategy */}
+      {strategyToApply && (
+        <Modal
+          isOpen={true}
+          onClose={() => setStrategyToApply(null)}
+          title={`Apply ${strategyToApply.strategy_title}?`}
+          subtitle="Confirm applying this mathematical recovery schedule to live database and broadcasting updates"
+          maxWidth="lg"
+        >
+          <div className="space-y-4">
+            <div className="bg-sand-50 p-4 rounded-lg border border-sand-300 text-xs space-y-2">
+              <div className="flex justify-between items-center py-1 border-b border-sand-200">
+                <span className="text-sand-600 font-medium">Strategy Type:</span>
+                <span className="font-bold text-sand-900">{strategyToApply.strategy_title}</span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-sand-200">
+                <span className="text-sand-600 font-medium">Interviews Moved:</span>
+                <span className="font-bold text-amber-800">{strategyToApply.moved_interviews} slots</span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-sand-200">
+                <span className="text-sand-600 font-medium">Interviews Preserved Unchanged:</span>
+                <span className="font-bold text-forest-800">{strategyToApply.unchanged_interviews} slots</span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-sand-200">
+                <span className="text-sand-600 font-medium">Schedule Stability:</span>
+                <span className="font-bold text-forest-800">{strategyToApply.stability_score.toFixed(1)}%</span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-sand-200">
+                <span className="text-sand-600 font-medium">Avg Student Waiting Time:</span>
+                <span className="font-bold text-sand-800">~{Math.round(strategyToApply.student_waiting_minutes || 0)} minutes</span>
+              </div>
+              <div className="flex justify-between items-center py-1">
+                <span className="text-sand-600 font-medium">Overall Composite Score:</span>
+                <span className="font-bold text-sand-900 text-sm">{strategyToApply.overall_score.toFixed(1)} / 100</span>
+              </div>
+            </div>
+
+            <p className="text-xs text-sand-600">
+              Applying this schedule will create a new official Schedule Version and instantly update all Coordinator, Company, and Student portals.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-sand-200">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setStrategyToApply(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                icon={<ArrowRight className="w-4 h-4" />}
+                onClick={handleConfirmApply}
+                isLoading={isLoading}
+              >
+                Confirm & Apply Recovery Schedule
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

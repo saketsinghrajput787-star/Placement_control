@@ -1,17 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { apiClient } from '../../api/client';
 import { Student } from '../../types';
+import { useOperations } from '../../store/operationsStore';
 import { Badge } from '../../components/common/Badge';
 import { Search, Users, GraduationCap } from 'lucide-react';
 
 export const StudentsPage: React.FC = () => {
+  const { scheduleVersion, syncCounter } = useOperations();
   const [students, setStudents] = useState<Student[]>([]);
   const [search, setSearch] = useState('');
   const [selectedBranch, setSelectedBranch] = useState('ALL');
 
   useEffect(() => {
     apiClient.get('/students?limit=500').then((res) => setStudents(res.data)).catch(console.error);
-  }, []);
+  }, [scheduleVersion, syncCounter]);
 
   const branches = ['ALL', 'CSE', 'ISE', 'ECE', 'EEE', 'MECH', 'CIVIL', 'AI_ML'];
 

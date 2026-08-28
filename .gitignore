@@ -41,6 +41,8 @@ frontend/dist-ssr/
 .env.production
 *.sqlite
 *.db
+*.db-shm
+*.db-wal
 
 # IDE & OS
 .vscode/

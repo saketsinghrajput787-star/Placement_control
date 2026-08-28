@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api"
     
+    # Environment mode
+    DEMO_MODE: bool = os.getenv("DEMO_MODE", "false").lower() in ("true", "1", "yes")
+    
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", DEFAULT_DB_URL)
     
@@ -38,6 +41,7 @@ class Settings(BaseSettings):
 
     class Config:
         case_sensitive = True
-        env_file = ".env"
+        extra = "ignore"
+        env_file = (os.path.join(_root_dir, ".env"), ".env")
 
 settings = Settings()

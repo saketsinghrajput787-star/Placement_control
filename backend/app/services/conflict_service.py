@@ -9,18 +9,23 @@ from app.scheduler.validator import validate_schedule_integrity
 
 class ConflictService:
     @staticmethod
-    def get_conflicts_for_latest_version(db: Session, version_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_conflicts_for_latest_version(db: Session, placement_session_id: str, version_id: Optional[str] = None) -> Dict[str, Any]:
         if not version_id:
-            latest = db.query(ScheduleVersion).order_by(ScheduleVersion.version_number.desc()).first()
+            latest = db.query(ScheduleVersion).filter(
+                ScheduleVersion.placement_session_id == placement_session_id
+            ).order_by(ScheduleVersion.version_number.desc()).first()
             if not latest:
                 return {"total_conflicts": 0, "conflicts": []}
             version_id = latest.id
 
-        interviews = db.query(Interview).filter(Interview.schedule_version_id == version_id).all()
-        students = {s.id: {"id": s.id, "student_code": s.student_code, "name": s.name, "branch": s.branch, "cgpa": s.cgpa} for s in db.query(Student).all()}
+        interviews = db.query(Interview).filter(
+            Interview.placement_session_id == placement_session_id,
+            Interview.schedule_version_id == version_id
+        ).all()
+        students = {s.id: {"id": s.id, "student_code": s.student_code, "name": s.name, "branch": s.branch, "cgpa": s.cgpa} for s in db.query(Student).filter(Student.placement_session_id == placement_session_id).all()}
         companies = {}
-        for c in db.query(Company).all():
-            req = db.query(CompanyRequirements).filter(CompanyRequirements.company_id == c.id).first()
+        for c in db.query(Company).filter(Company.placement_session_id == placement_session_id).all():
+            req = db.query(CompanyRequirements).filter(CompanyRequirements.placement_session_id == placement_session_id, CompanyRequirements.company_id == c.id).first()
             companies[c.id] = {
                 "id": c.id,
                 "company_code": c.company_code,
@@ -30,8 +35,8 @@ class ConflictService:
                     "eligible_branches": json.loads(req.eligible_branches) if req and req.eligible_branches else []
                 }
             }
-        rooms = {r.id: {"id": r.id, "room_code": r.room_code, "building": r.building} for r in db.query(Room).all()}
-        panels = {p.id: {"id": p.id, "panel_code": p.panel_code, "company_id": p.company_id} for p in db.query(Panel).all()}
+        rooms = {r.id: {"id": r.id, "room_code": r.room_code, "building": r.building} for r in db.query(Room).filter(Room.placement_session_id == placement_session_id).all()}
+        panels = {p.id: {"id": p.id, "panel_code": p.panel_code, "company_id": p.company_id} for p in db.query(Panel).filter(Panel.placement_session_id == placement_session_id).all()}
 
         iv_dicts = [
             {

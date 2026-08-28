@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { apiClient } from '../../api/client';
 import { Room, Panel } from '../../types';
+import { useOperations } from '../../store/operationsStore';
 import { Card } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { DoorOpen, Users, Video } from 'lucide-react';
 
 export const RoomsPanelsPage: React.FC = () => {
+  const { scheduleVersion, syncCounter } = useOperations();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [panels, setPanels] = useState<Panel[]>([]);
 
@@ -16,7 +18,7 @@ export const RoomsPanelsPage: React.FC = () => {
         setPanels(panelsRes.data);
       })
       .catch(console.error);
-  }, []);
+  }, [scheduleVersion, syncCounter]);
 
   return (
     <div className="space-y-6">

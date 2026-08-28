@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { apiClient } from '../../api/client';
 import { Company, Shortlist } from '../../types';
+import { useOperations } from '../../store/operationsStore';
 import { Badge } from '../../components/common/Badge';
 import { Search, ListOrdered, CheckCircle2 } from 'lucide-react';
 
 export const ShortlistPage: React.FC = () => {
+  const { scheduleVersion, syncCounter } = useOperations();
   const [company, setCompany] = useState<Company | null>(null);
   const [shortlists, setShortlists] = useState<Shortlist[]>([]);
   const [search, setSearch] = useState('');
@@ -18,7 +20,7 @@ export const ShortlistPage: React.FC = () => {
       if (res) setShortlists(res.data);
     }).catch(console.error)
       .finally(() => setIsLoading(false));
-  }, []);
+  }, [scheduleVersion, syncCounter]);
 
   const filtered = shortlists.filter((sh) => {
     if (search) {
@@ -82,7 +84,7 @@ export const ShortlistPage: React.FC = () => {
                   </td>
                   <td className="font-bold text-sand-800 font-mono text-sm">{sh.student_cgpa.toFixed(2)}</td>
                   <td>
-                    <Badge variant="healthy" size="sm" dot>
+                    <Badge variant={sh.status === 'WITHDRAWN' ? 'critical' : 'healthy'} size="sm" dot>
                       {sh.status}
                     </Badge>
                   </td>

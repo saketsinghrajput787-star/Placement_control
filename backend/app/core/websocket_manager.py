@@ -55,17 +55,24 @@ class ConnectionManager:
             if role == "COORDINATOR":
                 should_send = True
             elif role == "COMPANY":
-                # Company sees general schedule events, company-specific disruptions, or events targeting its company_id
-                if not target_company_id or target_company_id == company_id or event_type in ["SCHEDULE_UPDATED", "DATA_IMPORTED"]:
-                    should_send = True
-            elif role == "STUDENT":
-                # Student sees global schedule version updates or events affecting their student_id / user_id
+                # Companies see all global schedule changes, disruptions, cancellations, or company-targeted events
                 if (
-                    event_type in ["SCHEDULE_UPDATED", "SCHEDULE_GENERATED"]
-                    or (user_id and user_id in affected_user_ids)
-                    or (student_id and student_id in affected_student_ids)
+                    event_type in ["SCHEDULE_UPDATED", "SCHEDULE_GENERATED", "STUDENT_CANCELLED", "INTERVIEW_CANCELLED", "REPLAN_APPLIED", "DISRUPTION_SIMULATED", "DATA_IMPORTED", "DELAY_REPORTED"]
+                    or not target_company_id
+                    or target_company_id == company_id
                 ):
                     should_send = True
+            elif role == "STUDENT":
+                # Students see all schedule changes, version increments, cancellations, and replanning events
+                if (
+                    event_type in ["SCHEDULE_UPDATED", "SCHEDULE_GENERATED", "STUDENT_CANCELLED", "INTERVIEW_CANCELLED", "REPLAN_APPLIED", "DISRUPTION_SIMULATED", "DATA_IMPORTED"]
+                    or not affected_user_ids or user_id in affected_user_ids
+                    or not affected_student_ids or student_id in affected_student_ids
+                    or event_data.get("student_id") == student_id
+                ):
+                    should_send = True
+            else:
+                should_send = True
 
             if should_send:
                 try:

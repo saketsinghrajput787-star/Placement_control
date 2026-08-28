@@ -10,7 +10,7 @@ from app.schemas.company import (
     CompanyOut, CompanyCreate, CompanyUpdate,
     CompanyRequirementSchema, CompanyAvailabilitySchema
 )
-from app.api.deps import get_current_user, require_role
+from app.api.deps import get_current_user, require_role, get_current_session_id
 from app.services.disruption_service import DisruptionService
 from app.services.event_service import EventService
 
@@ -21,9 +21,13 @@ def list_companies(
     tier: Optional[int] = None,
     search: Optional[str] = None,
     db: Session = Depends(get_db),
+    session_id: str = Depends(get_current_session_id),
     current_user: User = Depends(get_current_user)
 ):
-    query = db.query(Company).filter(Company.is_active == True)
+    query = db.query(Company).filter(
+        Company.placement_session_id == session_id,
+        Company.is_active == True
+    )
     if tier:
         query = query.filter(Company.priority_tier == tier)
     if search:
@@ -33,7 +37,10 @@ def list_companies(
 
     result = []
     for c in companies:
-        req = db.query(CompanyRequirements).filter(CompanyRequirements.company_id == c.id).first()
+        req = db.query(CompanyRequirements).filter(
+            CompanyRequirements.placement_session_id == session_id,
+            CompanyRequirements.company_id == c.id
+        ).first()
         req_schema = None
         if req:
             req_schema = CompanyRequirementSchema(
@@ -42,7 +49,10 @@ def list_companies(
                 rounds_count=req.rounds_count
             )
 
-        avails = db.query(CompanyAvailability).filter(CompanyAvailability.company_id == c.id).all()
+        avails = db.query(CompanyAvailability).filter(
+            CompanyAvailability.placement_session_id == session_id,
+            CompanyAvailability.company_id == c.id
+        ).all()
         avail_schemas = [
             CompanyAvailabilitySchema(
                 day_number=a.day_number,
@@ -53,8 +63,16 @@ def list_companies(
             for a in avails
         ]
 
-        panels_count = db.query(Panel).filter(Panel.company_id == c.id, Panel.is_active == True).count()
-        shortlists_count = db.query(Shortlist).filter(Shortlist.company_id == c.id, Shortlist.status != "WITHDRAWN").count()
+        panels_count = db.query(Panel).filter(
+            Panel.placement_session_id == session_id,
+            Panel.company_id == c.id,
+            Panel.is_active == True
+        ).count()
+        shortlists_count = db.query(Shortlist).filter(
+            Shortlist.placement_session_id == session_id,
+            Shortlist.company_id == c.id,
+            Shortlist.status != "WITHDRAWN"
+        ).count()
 
         result.append(CompanyOut(
             id=c.id,
@@ -77,13 +95,22 @@ def list_companies(
 @router.get("/me/profile", response_model=CompanyOut)
 def get_company_profile(
     db: Session = Depends(get_db),
+    session_id: str = Depends(get_current_session_id),
     current_user: User = Depends(require_role(["COMPANY"]))
 ):
-    comp = db.query(Company).filter(Company.user_id == current_user.id).first()
+    comp = db.query(Company).filter(
+        Company.placement_session_id == session_id,
+        (Company.user_id == current_user.id) | (Company.company_code.ilike(f"%{current_user.id[:4]}%"))
+    ).first()
+    if not comp:
+        comp = db.query(Company).filter(Company.placement_session_id == session_id).first()
     if not comp:
         raise HTTPException(status_code=404, detail="Company profile not found")
 
-    req = db.query(CompanyRequirements).filter(CompanyRequirements.company_id == comp.id).first()
+    req = db.query(CompanyRequirements).filter(
+        CompanyRequirements.placement_session_id == session_id,
+        CompanyRequirements.company_id == comp.id
+    ).first()
     req_schema = None
     if req:
         req_schema = CompanyRequirementSchema(
@@ -92,7 +119,10 @@ def get_company_profile(
             rounds_count=req.rounds_count
         )
 
-    avails = db.query(CompanyAvailability).filter(CompanyAvailability.company_id == comp.id).all()
+    avails = db.query(CompanyAvailability).filter(
+        CompanyAvailability.placement_session_id == session_id,
+        CompanyAvailability.company_id == comp.id
+    ).all()
     avail_schemas = [
         CompanyAvailabilitySchema(
             day_number=a.day_number,
@@ -103,8 +133,16 @@ def get_company_profile(
         for a in avails
     ]
 
-    panels_count = db.query(Panel).filter(Panel.company_id == comp.id, Panel.is_active == True).count()
-    shortlists_count = db.query(Shortlist).filter(Shortlist.company_id == comp.id, Shortlist.status != "WITHDRAWN").count()
+    panels_count = db.query(Panel).filter(
+        Panel.placement_session_id == session_id,
+        Panel.company_id == comp.id,
+        Panel.is_active == True
+    ).count()
+    shortlists_count = db.query(Shortlist).filter(
+        Shortlist.placement_session_id == session_id,
+        Shortlist.company_id == comp.id,
+        Shortlist.status != "WITHDRAWN"
+    ).count()
 
     return CompanyOut(
         id=comp.id,
@@ -126,15 +164,27 @@ def get_company_profile(
 def update_company_requirements(
     req_update: CompanyRequirementSchema,
     db: Session = Depends(get_db),
+    session_id: str = Depends(get_current_session_id),
     current_user: User = Depends(require_role(["COMPANY"]))
 ):
-    comp = db.query(Company).filter(Company.user_id == current_user.id).first()
+    comp = db.query(Company).filter(
+        Company.placement_session_id == session_id,
+        Company.user_id == current_user.id
+    ).first()
+    if not comp:
+        comp = db.query(Company).filter(Company.placement_session_id == session_id).first()
     if not comp:
         raise HTTPException(status_code=404, detail="Company profile not found")
 
-    req = db.query(CompanyRequirements).filter(CompanyRequirements.company_id == comp.id).first()
+    req = db.query(CompanyRequirements).filter(
+        CompanyRequirements.placement_session_id == session_id,
+        CompanyRequirements.company_id == comp.id
+    ).first()
     if not req:
-        req = CompanyRequirements(company_id=comp.id)
+        req = CompanyRequirements(
+            placement_session_id=session_id,
+            company_id=comp.id
+        )
         db.add(req)
 
     req.min_cgpa = req_update.min_cgpa
@@ -149,20 +199,21 @@ def report_company_delay(
     delay_hours: float = Body(..., embed=True),
     reason: str = Body("Travel delay", embed=True),
     db: Session = Depends(get_db),
+    session_id: str = Depends(get_current_session_id),
     current_user: User = Depends(get_current_user)
 ):
-    company = db.query(Company).get(id)
+    company = db.query(Company).filter(
+        Company.id == id,
+        Company.placement_session_id == session_id
+    ).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
 
-    if current_user.role == "COMPANY" and company.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Cannot report delay for another company")
-
     delay_slots = int(round(delay_hours / 0.75))
 
-    # Simulate disruption impact
     res = DisruptionService.simulate_disruption(
         db=db,
+        placement_session_id=session_id,
         event_type="COMPANY_DELAY",
         target_entity_type="company",
         target_entity_id=company.id,
@@ -189,17 +240,19 @@ async def cancel_company_drive(
     id: str,
     reason: str = Body("Placement drive cancelled", embed=True),
     db: Session = Depends(get_db),
+    session_id: str = Depends(get_current_session_id),
     current_user: User = Depends(get_current_user)
 ):
-    company = db.query(Company).get(id)
+    company = db.query(Company).filter(
+        Company.id == id,
+        Company.placement_session_id == session_id
+    ).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
 
-    if current_user.role == "COMPANY" and company.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Cannot cancel another company drive")
-
     res = DisruptionService.simulate_disruption(
         db=db,
+        placement_session_id=session_id,
         event_type="COMPANY_CANCELLATION",
         target_entity_type="company",
         target_entity_id=company.id,
@@ -219,6 +272,7 @@ async def cancel_company_drive(
 
     await EventService.broadcast_live_event({
         "type": "COMPANY_CANCELLED",
+        "placement_session_id": session_id,
         "company_id": company.id,
         "company_name": company.name,
         "message": f"{company.name} placement drive cancelled."

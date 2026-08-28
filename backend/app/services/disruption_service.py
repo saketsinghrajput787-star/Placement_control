@@ -12,6 +12,7 @@ class DisruptionService:
     @staticmethod
     def simulate_disruption(
         db: Session,
+        placement_session_id: str,
         event_type: str,
         target_entity_type: str,
         target_entity_id: str,
@@ -23,7 +24,10 @@ class DisruptionService:
         affected_panel_ids = affected_panel_ids or []
         withdrawn_student_ids = withdrawn_student_ids or []
 
-        versions = db.query(ScheduleVersion).order_by(ScheduleVersion.version_number.desc()).all()
+        versions = db.query(ScheduleVersion).filter(
+            ScheduleVersion.placement_session_id == placement_session_id
+        ).order_by(ScheduleVersion.version_number.desc()).all()
+        
         latest_version = None
         for v in versions:
             if db.query(Interview).filter(Interview.schedule_version_id == v.id).count() > 0:
@@ -93,6 +97,7 @@ class DisruptionService:
 
         disruption = Disruption(
             id=str(uuid.uuid4()),
+            placement_session_id=placement_session_id,
             event_type=event_type,
             target_entity_type=target_entity_type,
             target_entity_id=target_entity_id,
@@ -100,27 +105,17 @@ class DisruptionService:
             parameters=json.dumps(params),
             status="SIMULATED"
         )
-        # Mark affected interviews' status and metadata when disruption occurs
-        for iv in affected_interviews:
-            meta = json.loads(iv.audit_metadata) if iv.audit_metadata else {}
-            if event_type in ["STUDENT_WITHDRAWAL", "STUDENT_CANCELLED_INTERVIEW", "COMPANY_CANCELLATION"]:
-                iv.status = "CANCELLED"
-                meta["replan_reason"] = f"Cancelled due to {event_type.replace('_', ' ').title()}: {reason}"
-            else:
-                iv.status = "RESCHEDULED"
-                meta["replan_reason"] = f"Disruption impact: {event_type.replace('_', ' ').title()} - {reason}"
-            iv.audit_metadata = json.dumps(meta)
-
+        
         db.add(disruption)
         db.commit()
         db.refresh(disruption)
 
         affected_details = []
         for iv in affected_interviews:
-            student = db.query(Student).get(iv.student_id)
-            comp = db.query(Company).get(iv.company_id)
-            room = db.query(Room).get(iv.room_id)
-            panel = db.query(Panel).get(iv.panel_id)
+            student = db.query(Student).filter(Student.id == iv.student_id, Student.placement_session_id == placement_session_id).first()
+            comp = db.query(Company).filter(Company.id == iv.company_id, Company.placement_session_id == placement_session_id).first()
+            room = db.query(Room).filter(Room.id == iv.room_id, Room.placement_session_id == placement_session_id).first()
+            panel = db.query(Panel).filter(Panel.id == iv.panel_id, Panel.placement_session_id == placement_session_id).first()
             affected_details.append({
                 "interview_id": iv.id,
                 "student_code": student.student_code if student else "N/A",

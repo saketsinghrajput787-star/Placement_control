@@ -6,8 +6,49 @@ from app.core.config import settings
 from app.db.session import engine, Base
 import app.models  # Ensure all models are registered
 
-# Create tables on startup
+from sqlalchemy import inspect, text
+
+def auto_migrate_schema(engine):
+    try:
+        inspector = inspect(engine)
+        tables = inspector.get_table_names()
+        with engine.connect() as conn:
+            for table in tables:
+                columns = [c["name"] for c in inspector.get_columns(table)]
+                if "placement_session_id" not in columns and table not in ["alembic_version"]:
+                    try:
+                        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN placement_session_id VARCHAR(36)"))
+                        conn.commit()
+                        print(f"Auto-migrated {table}: added placement_session_id column.")
+                    except Exception as e:
+                        print(f"Migration note for {table}: {e}")
+    except Exception as exc:
+        print(f"Auto-migration warning: {exc}")
+
+# Create tables and auto-migrate existing tables on startup
 Base.metadata.create_all(bind=engine)
+auto_migrate_schema(engine)
+
+# Ensure default placement session exists and bind unassigned records
+from app.db.session import SessionLocal
+from app.api.deps import get_or_create_active_session
+with SessionLocal() as _db:
+    try:
+        active_sess = get_or_create_active_session(_db)
+        sid = active_sess.id
+        with engine.connect() as conn:
+            inspector = inspect(engine)
+            tables = inspector.get_table_names()
+            for t in tables:
+                cols = [c["name"] for c in inspector.get_columns(t)]
+                if "placement_session_id" in cols:
+                    try:
+                        conn.execute(text(f"UPDATE {t} SET placement_session_id = :sid WHERE placement_session_id IS NULL OR placement_session_id = ''"), {"sid": sid})
+                        conn.commit()
+                    except Exception:
+                        pass
+    except Exception as e:
+        print(f"Session init warning: {e}")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -85,7 +126,14 @@ def root():
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Global exception on {request.method} {request.url}: {exc}", exc_info=True)
-    return JSONResponse(
+    response = JSONResponse(
         status_code=500,
-        content={"detail": "Internal server error occurred in Placement Control Tower engine."}
+        content={"detail": f"Internal server error: {str(exc)}"}
     )
+    origin = request.headers.get("origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    else:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+    return response

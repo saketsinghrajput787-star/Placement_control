@@ -106,13 +106,13 @@ export const LoginPage: React.FC = () => {
             </button>
 
             <button
-              onClick={() => handleQuickLogin('aarav.sharma@example.com', 'STUDENT', 'student123')}
+              onClick={() => handleQuickLogin('s0421@student.edu', 'STUDENT', 'student123')}
               className="p-2.5 rounded-md border border-sand-300 bg-sand-50 hover:bg-sand-100 text-sand-900 text-left transition-colors flex flex-col justify-between text-xs"
             >
               <GraduationCap className="w-4 h-4 text-sky-600 mb-1" />
               <div>
-                <div className="font-bold">Aarav Sharma</div>
-                <div className="text-[10px] text-sand-500 font-mono">S001 (CSE)</div>
+                <div className="font-bold">Alex Mercer</div>
+                <div className="text-[10px] text-sand-500 font-mono">S0421 (ISE)</div>
               </div>
             </button>
           </div>

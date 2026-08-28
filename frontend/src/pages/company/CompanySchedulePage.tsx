@@ -3,7 +3,10 @@ import { apiClient } from '../../api/client';
 import { Company, Interview } from '../../types';
 import { TimelineView } from '../../components/schedule/TimelineView';
 
+import { useOperations } from '../../store/operationsStore';
+
 export const CompanySchedulePage: React.FC = () => {
+  const { scheduleVersion, syncCounter } = useOperations();
   const [company, setCompany] = useState<Company | null>(null);
   const [interviews, setInterviews] = useState<Interview[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -16,7 +19,7 @@ export const CompanySchedulePage: React.FC = () => {
       if (res) setInterviews(res.data);
     }).catch(console.error)
       .finally(() => setIsLoading(false));
-  }, []);
+  }, [scheduleVersion, syncCounter]);
 
   if (isLoading) {
     return (

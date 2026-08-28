@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { apiClient } from '../../api/client';
+import { useOperations } from '../../store/operationsStore';
 import { AuditLogEntry } from '../../types';
 
 export const AuditLogPage: React.FC = () => {
+  const { scheduleVersion, syncCounter } = useOperations();
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -11,7 +13,7 @@ export const AuditLogPage: React.FC = () => {
       .then(res => setLogs(res.data))
       .catch(err => console.error('Failed to fetch audit logs', err))
       .finally(() => setLoading(false));
-  }, []);
+  }, [scheduleVersion, syncCounter]);
 
   return (
     <div className="space-y-6">

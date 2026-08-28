@@ -4,11 +4,18 @@ import { apiClient } from '../../api/client';
 import { DisruptionOut } from '../../types';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
-import { ShieldAlert, Play, Trash2 } from 'lucide-react';
+import { ShieldAlert, Play, Trash2, Check, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export const DisruptionsPage: React.FC = () => {
-  const { setIsDisruptionModalOpen, setReplanningResult } = useOperations();
+  const {
+    setIsDisruptionModalOpen,
+    setReplanningResult,
+    applyReplanningStrategy,
+    loadDashboardData,
+    scheduleVersion,
+    syncCounter
+  } = useOperations();
   const [disruptions, setDisruptions] = useState<DisruptionOut[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
@@ -24,7 +31,7 @@ export const DisruptionsPage: React.FC = () => {
 
   useEffect(() => {
     loadDisruptions();
-  }, []);
+  }, [scheduleVersion, syncCounter]);
 
   const handleClearDisruptions = async () => {
     if (!window.confirm('Are you sure you want to clear all disruption logs?')) return;
@@ -32,6 +39,7 @@ export const DisruptionsPage: React.FC = () => {
       await apiClient.delete('/disruptions/clear');
       setDisruptions([]);
       setReplanningResult(null);
+      await loadDashboardData();
     } catch (e: any) {
       alert(e.response?.data?.detail || 'Failed to clear disruption logs');
     }
@@ -45,6 +53,22 @@ export const DisruptionsPage: React.FC = () => {
       navigate('/coordinator/replanning');
     } catch (e: any) {
       alert(e.response?.data?.detail || 'Replanning failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleQuickApplyDisruption = async (disruptionId: string) => {
+    setIsLoading(true);
+    try {
+      const res = await apiClient.post('/replanning/run', { disruption_id: disruptionId });
+      const replanData = res.data;
+      const bestStrategy = replanData.recommended_strategy || replanData.selected_strategy || 'BALANCED';
+      await applyReplanningStrategy(replanData.replanning_run_id, bestStrategy);
+      await loadDisruptions();
+      await loadDashboardData();
+    } catch (e: any) {
+      alert(e.response?.data?.detail || 'Failed to apply recovery plan');
     } finally {
       setIsLoading(false);
     }
@@ -124,15 +148,40 @@ export const DisruptionsPage: React.FC = () => {
                     {new Date(d.created_at).toLocaleTimeString()}
                   </td>
                   <td>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      icon={<Play className="w-3 h-3" />}
-                      onClick={() => handleReplanDisruption(d.id)}
-                      isLoading={isLoading}
-                    >
-                      Replan
-                    </Button>
+                    <div className="flex items-center gap-1.5">
+                      {d.status !== 'APPLIED' ? (
+                        <>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            icon={<Check className="w-3 h-3" />}
+                            onClick={() => handleQuickApplyDisruption(d.id)}
+                            isLoading={isLoading}
+                          >
+                            Apply
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            icon={<Play className="w-3 h-3" />}
+                            onClick={() => handleReplanDisruption(d.id)}
+                            isLoading={isLoading}
+                          >
+                            Compare
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          icon={<RefreshCw className="w-3 h-3" />}
+                          onClick={() => handleReplanDisruption(d.id)}
+                          isLoading={isLoading}
+                        >
+                          Re-evaluate
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))
@@ -143,3 +192,4 @@ export const DisruptionsPage: React.FC = () => {
     </div>
   );
 };
+

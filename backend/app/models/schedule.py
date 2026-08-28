@@ -7,6 +7,7 @@ class Schedule(Base):
     __tablename__ = "schedules"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    placement_session_id = Column(String(36), ForeignKey("placement_sessions.id", ondelete="CASCADE"), index=True, nullable=True)
     name = Column(String(255), default="Placement Week 2026")
     academic_year = Column(String(50), default="2025-2026")
     status = Column(String(50), default="ACTIVE")  # DRAFT, ACTIVE, ARCHIVED
@@ -16,7 +17,8 @@ class ScheduleVersion(Base):
     __tablename__ = "schedule_versions"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    schedule_id = Column(String(36), ForeignKey("schedules.id"), index=True, nullable=False)
+    placement_session_id = Column(String(36), ForeignKey("placement_sessions.id", ondelete="CASCADE"), index=True, nullable=True)
+    schedule_id = Column(String(36), ForeignKey("schedules.id", ondelete="CASCADE"), index=True, nullable=False)
     version_number = Column(Integer, default=1)
     stability_score = Column(Float, default=100.0)
     metrics_snapshot = Column(Text, default="{}")  # JSON string of metrics
@@ -27,11 +29,12 @@ class Interview(Base):
     __tablename__ = "interviews"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    schedule_version_id = Column(String(36), ForeignKey("schedule_versions.id"), index=True, nullable=False)
-    student_id = Column(String(36), ForeignKey("students.id"), index=True, nullable=False)
-    company_id = Column(String(36), ForeignKey("companies.id"), index=True, nullable=False)
-    room_id = Column(String(36), ForeignKey("rooms.id"), index=True, nullable=False)
-    panel_id = Column(String(36), ForeignKey("panels.id"), index=True, nullable=False)
+    placement_session_id = Column(String(36), ForeignKey("placement_sessions.id", ondelete="CASCADE"), index=True, nullable=True)
+    schedule_version_id = Column(String(36), ForeignKey("schedule_versions.id", ondelete="CASCADE"), index=True, nullable=False)
+    student_id = Column(String(36), ForeignKey("students.id", ondelete="CASCADE"), index=True, nullable=False)
+    company_id = Column(String(36), ForeignKey("companies.id", ondelete="CASCADE"), index=True, nullable=False)
+    room_id = Column(String(36), ForeignKey("rooms.id", ondelete="CASCADE"), index=True, nullable=False)
+    panel_id = Column(String(36), ForeignKey("panels.id", ondelete="CASCADE"), index=True, nullable=False)
     day_number = Column(Integer, default=1)
     slot_index = Column(Integer, nullable=False)  # 0 to 11
     start_time_str = Column(String(10), nullable=False)  # "09:00"

@@ -1,3 +1,4 @@
+import json
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -6,7 +7,7 @@ from app.models.user import User
 from app.models.operations import Disruption
 from app.schemas.disruption import SimulateDisruptionRequest, DisruptionSimulationOut, DisruptionOut
 from app.services.disruption_service import DisruptionService
-from app.api.deps import get_current_user, require_role
+from app.api.deps import get_current_user, require_role, get_current_session_id
 
 router = APIRouter(prefix="/disruptions", tags=["disruptions"])
 
@@ -14,11 +15,13 @@ router = APIRouter(prefix="/disruptions", tags=["disruptions"])
 def simulate_disruption(
     req: SimulateDisruptionRequest,
     db: Session = Depends(get_db),
+    session_id: str = Depends(get_current_session_id),
     current_user: User = Depends(require_role(["COORDINATOR", "COMPANY"]))
 ):
     try:
         res = DisruptionService.simulate_disruption(
             db=db,
+            placement_session_id=session_id,
             event_type=req.event_type,
             target_entity_type=req.target_entity_type,
             target_entity_id=req.target_entity_id,
@@ -34,10 +37,13 @@ def simulate_disruption(
 @router.get("", response_model=List[DisruptionOut])
 def list_disruptions(
     db: Session = Depends(get_db),
+    session_id: str = Depends(get_current_session_id),
     current_user: User = Depends(get_current_user)
 ):
-    import json
-    disruptions = db.query(Disruption).order_by(Disruption.created_at.desc()).limit(50).all()
+    disruptions = db.query(Disruption).filter(
+        Disruption.placement_session_id == session_id
+    ).order_by(Disruption.created_at.desc()).limit(50).all()
+
     return [
         DisruptionOut(
             id=d.id,
@@ -55,13 +61,14 @@ def list_disruptions(
 @router.delete("/clear")
 def clear_disruptions(
     db: Session = Depends(get_db),
+    session_id: str = Depends(get_current_session_id),
     current_user: User = Depends(require_role(["COORDINATOR"]))
 ):
     from app.models.operations import ReplanningRun, ScheduleChange
     try:
-        db.query(ScheduleChange).delete()
-        db.query(ReplanningRun).delete()
-        count = db.query(Disruption).delete()
+        db.query(ScheduleChange).filter(ScheduleChange.placement_session_id == session_id).delete(synchronize_session=False)
+        db.query(ReplanningRun).filter(ReplanningRun.placement_session_id == session_id).delete(synchronize_session=False)
+        count = db.query(Disruption).filter(Disruption.placement_session_id == session_id).delete(synchronize_session=False)
         db.commit()
         return {"status": "SUCCESS", "message": f"Cleared {count} disruption logs."}
     except Exception as e:

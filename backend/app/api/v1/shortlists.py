@@ -6,7 +6,7 @@ from app.models.user import User
 from app.models.company import Company, Shortlist
 from app.models.student import Student
 from app.schemas.company import ShortlistOut, ShortlistCreate, ShortlistBatchCreate
-from app.api.deps import get_current_user, require_role
+from app.api.deps import get_current_user, require_role, get_current_session_id
 
 router = APIRouter(prefix="/shortlists", tags=["shortlists"])
 
@@ -14,15 +14,16 @@ router = APIRouter(prefix="/shortlists", tags=["shortlists"])
 def get_company_shortlists(
     company_id: str,
     db: Session = Depends(get_db),
+    session_id: str = Depends(get_current_session_id),
     current_user: User = Depends(get_current_user)
 ):
     shortlists = db.query(Shortlist).filter(
-        Shortlist.company_id == company_id,
-        Shortlist.status != "WITHDRAWN"
-    ).all()
+        Shortlist.placement_session_id == session_id,
+        Shortlist.company_id == company_id
+    ).order_by(Shortlist.preference_rank.asc()).all()
 
     student_ids = [sh.student_id for sh in shortlists]
-    students = {s.id: s for s in db.query(Student).filter(Student.id.in_(student_ids)).all()}
+    students = {s.id: s for s in db.query(Student).filter(Student.placement_session_id == session_id, Student.id.in_(student_ids)).all()}
 
     result = []
     for sh in shortlists:
@@ -45,9 +46,11 @@ def get_company_shortlists(
 def add_shortlist_entry(
     sh_in: ShortlistCreate,
     db: Session = Depends(get_db),
+    session_id: str = Depends(get_current_session_id),
     current_user: User = Depends(require_role(["COORDINATOR", "COMPANY"]))
 ):
     existing = db.query(Shortlist).filter(
+        Shortlist.placement_session_id == session_id,
         Shortlist.company_id == sh_in.company_id,
         Shortlist.student_id == sh_in.student_id
     ).first()
@@ -58,12 +61,15 @@ def add_shortlist_entry(
         db.refresh(existing)
         sh = existing
     else:
-        sh = Shortlist(**sh_in.dict())
+        sh = Shortlist(
+            placement_session_id=session_id,
+            **sh_in.dict()
+        )
         db.add(sh)
         db.commit()
         db.refresh(sh)
 
-    s = db.query(Student).get(sh.student_id)
+    s = db.query(Student).filter(Student.id == sh.student_id, Student.placement_session_id == session_id).first()
     return ShortlistOut(
         id=sh.id,
         company_id=sh.company_id,

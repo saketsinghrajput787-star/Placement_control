@@ -5,7 +5,7 @@ from app.db.session import get_db
 from app.models.user import User
 from app.schemas.analytics import AnalyticsDashboardOut
 from app.services.analytics_service import AnalyticsService
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_current_session_id
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -13,6 +13,7 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 def get_dashboard_analytics(
     version_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    session_id: str = Depends(get_current_session_id),
     current_user: User = Depends(get_current_user)
 ):
-    return AnalyticsService.get_dashboard_analytics(db, version_id=version_id)
+    return AnalyticsService.get_dashboard_analytics(db, placement_session_id=session_id, version_id=version_id)

@@ -6,6 +6,15 @@ class InterviewAuditMetadata(BaseModel):
     optimization_reasons: List[str] = []
     rejected_alternatives: List[Dict[str, str]] = []
     replan_reason: Optional[str] = None
+    cancellation_reason: Optional[str] = None
+    comment: Optional[str] = None
+    cancelled_by_role: Optional[str] = None
+    assignment_reason: Optional[str] = None
+    candidate_score: Optional[float] = None
+    candidate_rank: Optional[int] = None
+
+    class Config:
+        extra = "ignore"
 
 class InterviewOut(BaseModel):
     id: str

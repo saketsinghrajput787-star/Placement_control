@@ -83,7 +83,7 @@ class PlacementScheduler:
 
         active_rooms = [r for r_id, r in self.rooms.items() if r_id not in disabled_rooms]
 
-        # Build variables with full dynamic room and panel flexibility
+        # Build variables with smart replanning pruning and full dynamic flexibility
         for sh in self.shortlists:
             s_id = sh["student_id"]
             c_id = sh["company_id"]
@@ -97,28 +97,53 @@ class PlacementScheduler:
             end_slot = comp_avail.get("end_time_slot", self.num_slots) if isinstance(comp_avail, dict) else self.num_slots
 
             # Apply company delay offset
-            c_delay = delays.get(c_id, 0)
+            c_delay = delays.get(c_id, 0) or delays.get(comp.get("company_code"), 0) or delays.get(comp.get("name"), 0)
             if c_delay > 0:
                 start_slot = min(self.num_slots - 1, start_slot + c_delay)
 
-            for p_idx, p in enumerate(comp_panels):
-                p_id = p["id"]
-                base_r = baseline_map.get((s_id, c_id), {}).get("room_id")
-                
-                # Prune candidate rooms: match baseline room if active, else top 2 hashed active rooms
-                candidate_rooms = [r for r in active_rooms if r["id"] == base_r]
-                if not candidate_rooms:
-                    r1 = active_rooms[hash((p_id, 0)) % len(active_rooms)]
-                    r2 = active_rooms[hash((p_id, 1)) % len(active_rooms)]
-                    candidate_rooms = [r1] if r1["id"] == r2["id"] else [r1, r2]
+            base_iv = baseline_map.get((s_id, c_id))
 
+            # Smart replanning variable scoping:
+            if baseline_map and base_iv:
+                base_slot = base_iv.get("slot_index", 0)
+                base_room = base_iv.get("room_id")
+                base_panel = base_iv.get("panel_id")
+                
+                # Check if this specific interview is disrupted
+                is_affected = (
+                    c_delay > 0 or 
+                    base_room in disabled_rooms or 
+                    base_panel in disabled_panels or
+                    base_slot < start_slot
+                )
+
+                if not is_affected:
+                    candidate_slots = [base_slot]
+                    candidate_rooms = [r for r in active_rooms if r["id"] == base_room] or active_rooms[:2]
+                    candidate_panels = [p for p in comp_panels if p["id"] == base_panel] or comp_panels[:1]
+                else:
+                    # Affected interview: search all feasible slots >= start_slot
+                    candidate_slots = list(range(start_slot, min(end_slot, self.num_slots)))
+                    candidate_rooms = active_rooms
+                    candidate_panels = comp_panels
+            else:
+                candidate_slots = list(range(start_slot, min(end_slot, self.num_slots)))
+                candidate_rooms = active_rooms[:4]
+                candidate_panels = comp_panels
+
+            for p in candidate_panels:
+                p_id = p["id"]
                 for r in candidate_rooms:
                     r_id = r["id"]
-
-                    for t in range(start_slot, min(end_slot, self.num_slots)):
+                    for t in candidate_slots:
                         var_key = (s_id, c_id, p_id, r_id, t)
                         var = model.NewBoolVar(f"x_{s_id[:4]}_{c_id[:4]}_{p_id[:4]}_{r_id[:4]}_t{t}")
                         x[var_key] = var
+
+                        # Add warm start hint if matching baseline and unaffected
+                        if base_iv and base_iv.get("slot_index") == t and base_iv.get("panel_id") == p_id and base_iv.get("room_id") == r_id:
+                            if t >= start_slot:
+                                model.AddHint(var, 1)
 
                         shortlist_vars.setdefault((s_id, c_id), []).append(var)
                         student_vars.setdefault((s_id, t), []).append(var)
@@ -132,6 +157,7 @@ class PlacementScheduler:
         # 1. At most one interview per candidate shortlist pair
         for (s_id, c_id), vars_list in shortlist_vars.items():
             model.Add(sum(vars_list) <= 1)
+
 
         # 2. No Student Overlap (at most 1 interview per student per slot)
         for (s_id, t), vars_list in student_vars.items():
@@ -148,62 +174,60 @@ class PlacementScheduler:
         # -------------------------------------------------------------
         # MULTI-OBJECTIVE WEIGHTS & SCALARIZATION
         # -------------------------------------------------------------
-        # Priority rule: Placement Completion > Baseline Stability > Preferences
-        # Completion weight is set very high so CP-SAT NEVER cancels if a valid slot exists.
         if strategy_mode in ["MINIMAL_CHANGE", "STABILITY_FIRST"]:
             weights = {
                 "placement_completion": 100000,
                 "tier_priority": 10,
                 "early_time_bonus": 5,
-                "stability_exact": 50000,
-                "stability_same_slot": 25000,
-                "stability_same_room": 10000,
-                "stability_same_panel": 10000,
-                "company_contiguity": 50
+                "stability_exact": 80000,
+                "stability_same_slot": 40000,
+                "stability_same_room": 15000,
+                "stability_same_panel": 15000,
+                "slot_distance_penalty": 3000
             }
         elif strategy_mode == "STUDENT_FIRST":
             weights = {
                 "placement_completion": 100000,
-                "tier_priority": 100,
-                "early_time_bonus": 500,
-                "stability_exact": 20000,
-                "stability_same_slot": 10000,
-                "stability_same_room": 2000,
-                "stability_same_panel": 2000,
-                "company_contiguity": 50
+                "tier_priority": 80,
+                "early_time_bonus": 2500,
+                "stability_exact": 2000,
+                "stability_same_slot": 1000,
+                "stability_same_room": 200,
+                "stability_same_panel": 200,
+                "slot_distance_penalty": 100
             }
         elif strategy_mode == "COMPANY_FIRST":
             weights = {
                 "placement_completion": 100000,
-                "tier_priority": 300,
-                "early_time_bonus": 50,
-                "stability_exact": 25000,
-                "stability_same_slot": 15000,
-                "stability_same_room": 5000,
-                "stability_same_panel": 5000,
-                "company_contiguity": 2500
+                "tier_priority": 1200,
+                "early_time_bonus": 80,
+                "stability_exact": 8000,
+                "stability_same_slot": 4000,
+                "stability_same_room": 3000,
+                "stability_same_panel": 6000,
+                "slot_distance_penalty": 250
             }
         elif strategy_mode == "AUTO_REPLAN":
             weights = {
                 "placement_completion": 120000,
-                "tier_priority": 150,
-                "early_time_bonus": 100,
-                "stability_exact": 35000,
-                "stability_same_slot": 18000,
-                "stability_same_room": 7000,
-                "stability_same_panel": 7000,
-                "company_contiguity": 1000
+                "tier_priority": 250,
+                "early_time_bonus": 400,
+                "stability_exact": 15000,
+                "stability_same_slot": 8000,
+                "stability_same_room": 3000,
+                "stability_same_panel": 3000,
+                "slot_distance_penalty": 400
             }
         else:  # BALANCED
             weights = {
                 "placement_completion": 100000,
                 "tier_priority": 150,
-                "early_time_bonus": 50,
-                "stability_exact": 30000,
-                "stability_same_slot": 15000,
-                "stability_same_room": 5000,
-                "stability_same_panel": 5000,
-                "company_contiguity": 300
+                "early_time_bonus": 200,
+                "stability_exact": 12000,
+                "stability_same_slot": 6000,
+                "stability_same_room": 2500,
+                "stability_same_panel": 2500,
+                "slot_distance_penalty": 350
             }
 
         objective_terms = []
@@ -218,11 +242,6 @@ class PlacementScheduler:
                 + (weights["early_time_bonus"] * (self.num_slots - t))
             )
 
-            # Recovery Priority rewards:
-            # 1. Exact match (same time slot, room, panel)
-            # 2. Same time slot, change room or panel
-            # 3. Same room / panel
-            # 4. Minimal time shift penalty proportional to distance
             if (s_id, c_id) in baseline_map:
                 base_iv = baseline_map[(s_id, c_id)]
                 base_t = base_iv.get("slot_index")
@@ -236,7 +255,7 @@ class PlacementScheduler:
                         term_score += weights["stability_same_slot"]
                     else:
                         slot_distance = abs(t - base_t)
-                        term_score -= (slot_distance * 200)
+                        term_score -= (slot_distance * weights.get("slot_distance_penalty", 500))
 
                     if base_r == r_id:
                         term_score += weights["stability_same_room"]

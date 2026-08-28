@@ -13,11 +13,13 @@ import { ReportDelayModal } from '../../components/company/ReportDelayModal';
 
 export const CompanyDashboard: React.FC = () => {
   const { user } = useAuth();
-  const { scheduleVersion, setIsDiffModalOpen } = useOperations();
+  const { scheduleVersion, syncCounter, setIsDiffModalOpen } = useOperations();
   const navigate = useNavigate();
   const [company, setCompany] = useState<Company | null>(null);
   const [interviews, setInterviews] = useState<Interview[]>([]);
   const [isDelayModalOpen, setIsDelayModalOpen] = useState<boolean>(false);
+  const [search, setSearch] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'SCHEDULED' | 'CANCELLED' | 'RESCHEDULED'>('ALL');
 
   const fetchCompanyData = () => {
     apiClient.get('/companies/me/profile').then((res) => {
@@ -30,7 +32,29 @@ export const CompanyDashboard: React.FC = () => {
 
   useEffect(() => {
     fetchCompanyData();
-  }, [scheduleVersion]);
+  }, [scheduleVersion, syncCounter]);
+
+  const cancelledCount = interviews.filter(i => i.status === 'CANCELLED').length;
+  const rescheduledCount = interviews.filter(i => i.status === 'RESCHEDULED' || i.status === 'REPLACEMENT').length;
+  const scheduledCount = interviews.filter(i => i.status === 'SCHEDULED').length;
+
+  const filteredInterviews = interviews.filter((iv) => {
+    if (statusFilter === 'CANCELLED' && iv.status !== 'CANCELLED') return false;
+    if (statusFilter === 'SCHEDULED' && iv.status !== 'SCHEDULED') return false;
+    if (statusFilter === 'RESCHEDULED' && iv.status !== 'RESCHEDULED' && iv.status !== 'REPLACEMENT') return false;
+
+    if (search) {
+      const q = search.toLowerCase();
+      return (
+        iv.student_name.toLowerCase().includes(q) ||
+        iv.student_code.toLowerCase().includes(q) ||
+        iv.room_code.toLowerCase().includes(q) ||
+        iv.panel_code.toLowerCase().includes(q) ||
+        iv.status.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
 
   return (
     <div className="space-y-6">
@@ -113,7 +137,46 @@ export const CompanyDashboard: React.FC = () => {
           </div>
         }
       >
-        <div className="overflow-x-auto">
+        <div className="p-3 bg-sand-50 border-b border-sand-200 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 overflow-x-auto">
+            <button
+              onClick={() => setStatusFilter('ALL')}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                statusFilter === 'ALL' ? 'bg-forest-800 text-white' : 'bg-white text-sand-700 border border-sand-300 hover:bg-sand-100'
+              }`}
+            >
+              All ({interviews.length})
+            </button>
+            <button
+              onClick={() => setStatusFilter('SCHEDULED')}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                statusFilter === 'SCHEDULED' ? 'bg-emerald-700 text-white' : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
+              }`}
+            >
+              Scheduled ({scheduledCount})
+            </button>
+            <button
+              onClick={() => setStatusFilter('CANCELLED')}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                statusFilter === 'CANCELLED' ? 'bg-rose-700 text-white' : 'bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100'
+              }`}
+            >
+              Cancelled ({cancelledCount})
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 flex-1 max-w-xs">
+            <input
+              type="text"
+              placeholder="Search candidate (e.g. Alex, S0421)..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full px-3 py-1.5 text-xs bg-white border border-sand-300 rounded-lg text-sand-900 focus:outline-none focus:ring-1 focus:ring-forest-600 font-medium"
+            />
+          </div>
+        </div>
+
+        <div className="overflow-x-auto max-h-[480px]">
           <table className="w-full ops-table">
             <thead>
               <tr>
@@ -126,41 +189,64 @@ export const CompanyDashboard: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {interviews.length === 0 ? (
+              {filteredInterviews.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-8 text-center text-sand-500 italic">
-                    No scheduled interviews currently assigned for today.
+                    No scheduled interviews currently match your search or filter.
                   </td>
                 </tr>
               ) : (
-                interviews.slice(0, 8).map((iv) => (
-                  <tr key={iv.id}>
-                    <td className="font-mono font-bold text-forest-800 text-xs">{iv.start_time_str} – {iv.end_time_str}</td>
-                    <td>
-                      <div className="font-semibold text-sand-900">{iv.student_name}</div>
-                      <div className="text-xs text-sand-500 font-mono">{iv.student_code}</div>
-                    </td>
-                    <td>
-                      <span className="font-mono text-xs bg-sand-200 px-1.5 py-0.5 rounded mr-1">{iv.student_branch}</span>
-                      <span className="font-semibold text-xs text-sand-800">{iv.student_cgpa.toFixed(2)}</span>
-                    </td>
-                    <td>
-                      <span className="font-mono text-xs bg-forest-50 text-forest-900 border border-forest-200 px-2 py-0.5 rounded font-semibold">
-                        {iv.room_code}
-                      </span>
-                    </td>
-                    <td>
-                      <span className="font-mono text-xs bg-sand-100 text-sand-800 border border-sand-300 px-2 py-0.5 rounded font-semibold">
-                        {iv.panel_code}
-                      </span>
-                    </td>
-                    <td>
-                      <Badge variant={iv.status === 'CANCELLED' ? 'critical' : 'healthy'} size="sm" dot>
-                        {iv.status}
-                      </Badge>
-                    </td>
-                  </tr>
-                ))
+                filteredInterviews.map((iv) => {
+                  const isCancelled = iv.status === 'CANCELLED';
+                  const isRescheduled = iv.status === 'RESCHEDULED' || iv.status === 'REPLACEMENT';
+
+                  return (
+                    <tr key={iv.id} className={isCancelled ? 'bg-rose-50/50' : isRescheduled ? 'bg-amber-50/30' : ''}>
+                      <td className="font-mono font-bold text-xs">
+                        <span className={isCancelled ? 'line-through text-rose-600' : 'text-forest-800'}>
+                          {iv.start_time_str} – {iv.end_time_str}
+                        </span>
+                      </td>
+                      <td>
+                        <div className={`font-semibold ${isCancelled ? 'line-through text-rose-900 font-bold' : 'text-sand-900'}`}>
+                          {iv.student_name}
+                        </div>
+                        <div className="text-xs text-sand-500 font-mono">{iv.student_code}</div>
+                      </td>
+                      <td>
+                        <span className="font-mono text-xs bg-sand-200 px-1.5 py-0.5 rounded mr-1">{iv.student_branch}</span>
+                        <span className="font-semibold text-xs text-sand-800">{iv.student_cgpa.toFixed(2)}</span>
+                      </td>
+                      <td>
+                        <span className={`font-mono text-xs border px-2 py-0.5 rounded font-semibold ${
+                          isCancelled ? 'bg-rose-100 text-rose-800 border-rose-200' : 'bg-forest-50 text-forest-900 border-forest-200'
+                        }`}>
+                          {iv.room_code}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="font-mono text-xs bg-sand-100 text-sand-800 border border-sand-300 px-2 py-0.5 rounded font-semibold">
+                          {iv.panel_code}
+                        </span>
+                      </td>
+                      <td>
+                        {isCancelled ? (
+                          <Badge variant="critical" size="sm" dot>
+                            CANCELLED
+                          </Badge>
+                        ) : isRescheduled ? (
+                          <Badge variant="warning" size="sm" dot>
+                            RESCHEDULED
+                          </Badge>
+                        ) : (
+                          <Badge variant="healthy" size="sm" dot>
+                            {iv.status}
+                          </Badge>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

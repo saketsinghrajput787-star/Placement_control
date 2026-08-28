@@ -11,7 +11,6 @@ from app.services.disruption_service import DisruptionService
 from app.services.replanning_service import ReplanningService
 from app.services.cancellation_service import CancellationService
 from app.services.schedule_service import ScheduleService
-
 from tests.conftest import TestingSessionLocal
 
 @pytest.fixture
@@ -24,13 +23,21 @@ def db():
 
 def ensure_test_data_seeded(db):
     Base.metadata.create_all(bind=db.get_bind())
-    if db.query(Student).count() == 0:
+    from app.models.placement_session import PlacementSession
+    sess = db.query(PlacementSession).filter(PlacementSession.id == "test-session-001").first()
+    if not sess:
+        sess = PlacementSession(id="test-session-001", name="Test Session", college_name="Test University", academic_year="2025-2026", status="ACTIVE")
+        db.add(sess)
+        db.commit()
+    session_id = sess.id
+
+    if db.query(Student).filter(Student.placement_session_id == session_id).count() == 0:
         import uuid
         stds = []
         for i in range(1, 11):
             u = User(id=str(uuid.uuid4()), email=f"s{i}@test.com", hashed_password="pwd", role="STUDENT")
             db.add(u)
-            s = Student(id=str(uuid.uuid4()), user_id=u.id, student_code=f"S{i:03d}", name=f"Student {i}", email=f"s{i}@test.com", branch="CSE", cgpa=7.0 + (i * 0.2))
+            s = Student(id=str(uuid.uuid4()), placement_session_id=session_id, user_id=u.id, student_code=f"S{i:03d}", name=f"Student {i}", email=f"s{i}@test.com", branch="CSE", cgpa=7.0 + (i * 0.2))
             db.add(s)
             stds.append(s)
         
@@ -38,24 +45,24 @@ def ensure_test_data_seeded(db):
         for i in range(1, 4):
             u = User(id=str(uuid.uuid4()), email=f"comp{i}@test.com", hashed_password="pwd", role="COMPANY")
             db.add(u)
-            c = Company(id=str(uuid.uuid4()), user_id=u.id, company_code=f"COMP{i}", name=f"Company {i}", priority_tier=i)
+            c = Company(id=str(uuid.uuid4()), placement_session_id=session_id, user_id=u.id, company_code=f"COMP{i}", name=f"Company {i}", priority_tier=i)
             db.add(c)
             comps.append(c)
-            req = CompanyRequirements(id=str(uuid.uuid4()), company_id=c.id, min_cgpa=6.5, eligible_branches='["CSE"]')
+            req = CompanyRequirements(id=str(uuid.uuid4()), placement_session_id=session_id, company_id=c.id, min_cgpa=6.5, eligible_branches='["CSE"]')
             db.add(req)
-            avail = CompanyAvailability(id=str(uuid.uuid4()), company_id=c.id, start_time_slot=0, end_time_slot=12)
+            avail = CompanyAvailability(id=str(uuid.uuid4()), placement_session_id=session_id, company_id=c.id, start_time_slot=0, end_time_slot=12)
             db.add(avail)
             
-            p = Panel(id=str(uuid.uuid4()), company_id=c.id, panel_code=f"P{i}")
+            p = Panel(id=str(uuid.uuid4()), placement_session_id=session_id, company_id=c.id, panel_code=f"P{i}")
             db.add(p)
             
         for i in range(1, 4):
-            r = Room(id=str(uuid.uuid4()), room_code=f"R{i}", building="Main Block")
+            r = Room(id=str(uuid.uuid4()), placement_session_id=session_id, room_code=f"R{i}", building="Main Block")
             db.add(r)
             
         for s in stds:
             for c in comps:
-                sh = Shortlist(id=str(uuid.uuid4()), company_id=c.id, student_id=s.id, status="SHORTLISTED")
+                sh = Shortlist(id=str(uuid.uuid4()), placement_session_id=session_id, company_id=c.id, student_id=s.id, status="SHORTLISTED")
                 db.add(sh)
                 
         db.commit()
@@ -63,45 +70,45 @@ def ensure_test_data_seeded(db):
 def ensure_baseline_schedule(db):
     db.expire_all()
     ensure_test_data_seeded(db)
-    db.query(Room).update({"is_active": True})
-    db.query(Panel).update({"is_active": True})
-    db.query(Student).update({"is_active": True, "is_withdrawn": False})
-    db.query(Company).update({"is_active": True})
-    db.query(Shortlist).update({"status": "SHORTLISTED"})
+    session_id = "test-session-001"
+    db.query(Room).filter(Room.placement_session_id == session_id).update({"is_active": True})
+    db.query(Panel).filter(Panel.placement_session_id == session_id).update({"is_active": True})
+    db.query(Student).filter(Student.placement_session_id == session_id).update({"is_active": True, "is_withdrawn": False})
+    db.query(Company).filter(Company.placement_session_id == session_id).update({"is_active": True})
+    db.query(Shortlist).filter(Shortlist.placement_session_id == session_id).update({"status": "SHORTLISTED"})
     db.commit()
 
-    res = ScheduleService.generate_initial_schedule(db, max_time_seconds=10)
+    res = ScheduleService.generate_initial_schedule(db, placement_session_id=session_id, max_time_seconds=10)
     db.expire_all()
-    return db.query(ScheduleVersion).order_by(ScheduleVersion.version_number.desc()).first()
+    return db.query(ScheduleVersion).filter(ScheduleVersion.placement_session_id == session_id).order_by(ScheduleVersion.version_number.desc()).first()
 
 def get_active_interview(db):
     db.expire_all()
     version = ensure_baseline_schedule(db)
     iv = db.query(Interview).filter(
+        Interview.placement_session_id == "test-session-001",
         Interview.schedule_version_id == version.id,
         Interview.status == "SCHEDULED"
     ).first()
     if not iv:
-        iv = db.query(Interview).filter(Interview.status == "SCHEDULED").order_by(Interview.id.desc()).first()
+        iv = db.query(Interview).filter(Interview.placement_session_id == "test-session-001", Interview.status == "SCHEDULED").order_by(Interview.id.desc()).first()
     return iv
 
 def test_scenario_1_company_delay(db):
-    """
-    TEST 1 — COMPANY DELAY
-    Company delayed by 90 minutes (2 slots).
-    Expected: Affected interviews identified, rescheduled to valid slots, cancellation count = 0 if valid slots exist.
-    """
+    session_id = "test-session-001"
     version = ensure_baseline_schedule(db)
     active_ivs = db.query(Interview).filter(
+        Interview.placement_session_id == session_id,
         Interview.schedule_version_id == version.id,
         Interview.status == "SCHEDULED"
     ).all()
     assert len(active_ivs) > 0, "Scheduled interviews required"
-    company = db.query(Company).get(active_ivs[0].company_id)
+    company = db.query(Company).filter(Company.id == active_ivs[0].company_id, Company.placement_session_id == session_id).first()
     assert company is not None, "Active company required for test"
 
     sim_res = DisruptionService.simulate_disruption(
         db=db,
+        placement_session_id=session_id,
         event_type="COMPANY_DELAY",
         target_entity_type="company",
         target_entity_id=company.id,
@@ -112,11 +119,12 @@ def test_scenario_1_company_delay(db):
     assert sim_res["affected_interviews_count"] > 0
     disruption_id = sim_res["disruption_id"]
 
-    replan_res = ReplanningService.run_replanning(db=db, disruption_id=disruption_id)
+    replan_res = ReplanningService.run_replanning(db=db, placement_session_id=session_id, disruption_id=disruption_id)
     assert len(replan_res["strategies_comparison"]) == 5
 
     apply_res = ReplanningService.apply_replan_strategy(
         db=db,
+        placement_session_id=session_id,
         replanning_run_id=replan_res["replanning_run_id"],
         strategy_type="BALANCED"
     )
@@ -124,27 +132,25 @@ def test_scenario_1_company_delay(db):
 
     new_version_id = apply_res["new_schedule_version_id"]
     new_interviews = db.query(Interview).filter(
+        Interview.placement_session_id == session_id,
         Interview.schedule_version_id == new_version_id,
         Interview.company_id == company.id,
         Interview.status != "CANCELLED"
     ).all()
 
-    # Verify company interviews are not scheduled in delayed slots (slots 0 and 1)
     for iv in new_interviews:
         assert iv.slot_index >= 2, f"Interview scheduled at slot {iv.slot_index} during 2-slot company delay"
 
 def test_scenario_2_room_unavailable(db):
-    """
-    TEST 2 — ROOM UNAVAILABLE
-    Disable room. Affected interviews are moved to available rooms or times without cancellation.
-    """
+    session_id = "test-session-001"
     version = ensure_baseline_schedule(db)
-    room_ids_with_interviews = [iv.room_id for iv in db.query(Interview).filter(Interview.schedule_version_id == version.id, Interview.status == "SCHEDULED").all()]
-    room = db.query(Room).filter(Room.id.in_(room_ids_with_interviews)).first() if room_ids_with_interviews else db.query(Room).first()
+    room_ids_with_interviews = [iv.room_id for iv in db.query(Interview).filter(Interview.placement_session_id == session_id, Interview.schedule_version_id == version.id, Interview.status == "SCHEDULED").all()]
+    room = db.query(Room).filter(Room.placement_session_id == session_id, Room.id.in_(room_ids_with_interviews)).first() if room_ids_with_interviews else db.query(Room).filter(Room.placement_session_id == session_id).first()
     assert room is not None
 
     sim_res = DisruptionService.simulate_disruption(
         db=db,
+        placement_session_id=session_id,
         event_type="ROOM_UNAVAILABLE",
         target_entity_type="room",
         target_entity_id=room.id,
@@ -152,35 +158,34 @@ def test_scenario_2_room_unavailable(db):
     )
 
     disruption_id = sim_res["disruption_id"]
-    replan_res = ReplanningService.run_replanning(db=db, disruption_id=disruption_id)
+    replan_res = ReplanningService.run_replanning(db=db, placement_session_id=session_id, disruption_id=disruption_id)
     apply_res = ReplanningService.apply_replan_strategy(
         db=db,
+        placement_session_id=session_id,
         replanning_run_id=replan_res["replanning_run_id"],
         strategy_type="MINIMAL_CHANGE"
     )
 
     new_version_id = apply_res["new_schedule_version_id"]
     new_interviews = db.query(Interview).filter(
+        Interview.placement_session_id == session_id,
         Interview.schedule_version_id == new_version_id,
         Interview.status == "SCHEDULED"
     ).all()
 
-    # None of the active interviews in new schedule should use disabled room
     for iv in new_interviews:
         assert iv.room_id != room.id, f"Disabled room {room.room_code} still assigned in new schedule"
 
 def test_scenario_3_panel_unavailable(db):
-    """
-    TEST 3 — PANEL UNAVAILABLE
-    Disable panel. Affected interviews reassigned to qualified panels or rescheduled.
-    """
+    session_id = "test-session-001"
     version = ensure_baseline_schedule(db)
-    panel_ids_with_interviews = [iv.panel_id for iv in db.query(Interview).filter(Interview.schedule_version_id == version.id, Interview.status == "SCHEDULED").all()]
-    panel = db.query(Panel).filter(Panel.id.in_(panel_ids_with_interviews)).first() if panel_ids_with_interviews else db.query(Panel).first()
+    panel_ids_with_interviews = [iv.panel_id for iv in db.query(Interview).filter(Interview.placement_session_id == session_id, Interview.schedule_version_id == version.id, Interview.status == "SCHEDULED").all()]
+    panel = db.query(Panel).filter(Panel.placement_session_id == session_id, Panel.id.in_(panel_ids_with_interviews)).first() if panel_ids_with_interviews else db.query(Panel).filter(Panel.placement_session_id == session_id).first()
     assert panel is not None
 
     sim_res = DisruptionService.simulate_disruption(
         db=db,
+        placement_session_id=session_id,
         event_type="PANEL_UNAVAILABLE",
         target_entity_type="panel",
         target_entity_id=panel.id,
@@ -188,15 +193,17 @@ def test_scenario_3_panel_unavailable(db):
     )
 
     disruption_id = sim_res["disruption_id"]
-    replan_res = ReplanningService.run_replanning(db=db, disruption_id=disruption_id)
+    replan_res = ReplanningService.run_replanning(db=db, placement_session_id=session_id, disruption_id=disruption_id)
     apply_res = ReplanningService.apply_replan_strategy(
         db=db,
+        placement_session_id=session_id,
         replanning_run_id=replan_res["replanning_run_id"],
         strategy_type="BALANCED"
     )
 
     new_version_id = apply_res["new_schedule_version_id"]
     new_interviews = db.query(Interview).filter(
+        Interview.placement_session_id == session_id,
         Interview.schedule_version_id == new_version_id,
         Interview.status == "SCHEDULED"
     ).all()
@@ -205,10 +212,7 @@ def test_scenario_3_panel_unavailable(db):
         assert iv.panel_id != panel.id, f"Disabled panel {panel.panel_code} still assigned in new schedule"
 
 def test_scenario_4_student_cancellation_reassignment(db):
-    """
-    TEST 4 — STUDENT CANCELLATION
-    Student cancels. Freed slot search identifies eligible replacement and reassigns it.
-    """
+    session_id = "test-session-001"
     iv = get_active_interview(db)
     assert iv is not None
 
@@ -216,6 +220,7 @@ def test_scenario_4_student_cancellation_reassignment(db):
 
     res = CancellationService.handle_student_cancellation(
         db=db,
+        placement_session_id=session_id,
         interview_id=iv.id,
         reason="Illness",
         comment="Medical emergency",
@@ -225,8 +230,8 @@ def test_scenario_4_student_cancellation_reassignment(db):
     assert res["cancellation_id"] is not None
     assert res["new_schedule_version_id"] is not None
 
-    # Check new version interviews
     new_version_ivs = db.query(Interview).filter(
+        Interview.placement_session_id == session_id,
         Interview.schedule_version_id == res["new_schedule_version_id"],
         Interview.slot_index == iv.slot_index,
         Interview.room_id == iv.room_id,
@@ -234,7 +239,6 @@ def test_scenario_4_student_cancellation_reassignment(db):
         Interview.status == "SCHEDULED"
     ).all()
 
-    # Slot should either be assigned to a replacement student or remain vacant
     if res["replacement_assigned"]:
         assert len(new_version_ivs) == 1
         assert new_version_ivs[0].student_id != iv.student_id
@@ -245,12 +249,10 @@ def test_scenario_4_student_cancellation_reassignment(db):
         assert len(new_version_ivs) == 0
 
 def test_scenario_5_multiple_student_cancellations(db):
-    """
-    TEST 5 — MULTIPLE CANCELLATIONS
-    Multiple students cancel. System handles each sequentially, updating schedule without conflicts.
-    """
+    session_id = "test-session-001"
     version = ensure_baseline_schedule(db)
     ivs = db.query(Interview).filter(
+        Interview.placement_session_id == session_id,
         Interview.schedule_version_id == version.id,
         Interview.status == "SCHEDULED"
     ).limit(3).all()
@@ -259,8 +261,9 @@ def test_scenario_5_multiple_student_cancellations(db):
     user = db.query(User).filter(User.role == "COORDINATOR").first() or db.query(User).first()
 
     for target_iv in ivs:
-        curr_ver = db.query(ScheduleVersion).order_by(ScheduleVersion.version_number.desc()).first()
+        curr_ver = db.query(ScheduleVersion).filter(ScheduleVersion.placement_session_id == session_id).order_by(ScheduleVersion.version_number.desc()).first()
         active_target = db.query(Interview).filter(
+            Interview.placement_session_id == session_id,
             Interview.schedule_version_id == curr_ver.id,
             Interview.student_id == target_iv.student_id,
             Interview.company_id == target_iv.company_id,
@@ -270,19 +273,20 @@ def test_scenario_5_multiple_student_cancellations(db):
         if active_target:
             CancellationService.handle_student_cancellation(
                 db=db,
+                placement_session_id=session_id,
                 interview_id=active_target.id,
                 reason="Multiple cancellation test",
                 comment=None,
                 current_user=user
             )
 
-    latest_ver = db.query(ScheduleVersion).order_by(ScheduleVersion.version_number.desc()).first()
+    latest_ver = db.query(ScheduleVersion).filter(ScheduleVersion.placement_session_id == session_id).order_by(ScheduleVersion.version_number.desc()).first()
     final_ivs = db.query(Interview).filter(
+        Interview.placement_session_id == session_id,
         Interview.schedule_version_id == latest_ver.id,
         Interview.status == "SCHEDULED"
     ).all()
 
-    # Verify no duplicate student slot overlaps in final schedule
     seen_slots = set()
     for f_iv in final_ivs:
         key = (f_iv.student_id, f_iv.slot_index, f_iv.day_number)
@@ -290,15 +294,11 @@ def test_scenario_5_multiple_student_cancellations(db):
         seen_slots.add(key)
 
 def test_scenario_6_no_valid_replacement(db):
-    """
-    TEST 6 — NO VALID REPLACEMENT
-    Student cancels when no eligible replacement student exists (e.g. strict CGPA 10 requirement).
-    Expected: Slot left vacant, replacement_assigned is False, audit message explains no eligible student available.
-    """
+    session_id = "test-session-001"
     iv = get_active_interview(db)
     assert iv is not None
 
-    req = db.query(CompanyRequirements).filter(CompanyRequirements.company_id == iv.company_id).first()
+    req = db.query(CompanyRequirements).filter(CompanyRequirements.placement_session_id == session_id, CompanyRequirements.company_id == iv.company_id).first()
     orig_cgpa = req.min_cgpa if req else 6.0
     if req:
         req.min_cgpa = 10.0
@@ -308,6 +308,7 @@ def test_scenario_6_no_valid_replacement(db):
         user = db.query(User).filter(User.role == "COORDINATOR").first() or db.query(User).first()
         res = CancellationService.handle_student_cancellation(
             db=db,
+            placement_session_id=session_id,
             interview_id=iv.id,
             reason="Unavailability test",
             comment=None,

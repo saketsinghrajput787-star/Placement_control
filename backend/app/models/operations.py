@@ -7,6 +7,7 @@ class Disruption(Base):
     __tablename__ = "disruptions"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    placement_session_id = Column(String(36), ForeignKey("placement_sessions.id", ondelete="CASCADE"), index=True, nullable=True)
     event_type = Column(String(50), nullable=False)  # COMPANY_DELAY, COMPANY_CANCELLATION, PANEL_UNAVAILABLE, ROOM_UNAVAILABLE, STUDENT_WITHDRAWAL, STUDENT_CANCELLED_INTERVIEW
     target_entity_type = Column(String(50), nullable=False)  # company, panel, room, student
     target_entity_id = Column(String(36), nullable=False)
@@ -20,9 +21,10 @@ class ReplanningRun(Base):
     __tablename__ = "replanning_runs"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    disruption_id = Column(String(36), ForeignKey("disruptions.id"), index=True, nullable=False)
-    source_version_id = Column(String(36), ForeignKey("schedule_versions.id"), index=True, nullable=False)
-    resulting_version_id = Column(String(36), ForeignKey("schedule_versions.id"), index=True, nullable=True)
+    placement_session_id = Column(String(36), ForeignKey("placement_sessions.id", ondelete="CASCADE"), index=True, nullable=True)
+    disruption_id = Column(String(36), ForeignKey("disruptions.id", ondelete="CASCADE"), index=True, nullable=False)
+    source_version_id = Column(String(36), ForeignKey("schedule_versions.id", ondelete="CASCADE"), index=True, nullable=False)
+    resulting_version_id = Column(String(36), ForeignKey("schedule_versions.id", ondelete="CASCADE"), index=True, nullable=True)
     strategy_type = Column(String(50), nullable=False)  # STUDENT_FIRST, BALANCED, STABILITY_FIRST
     strategy_score = Column(Float, default=0.0)
     stability_score = Column(Float, default=100.0)
@@ -34,9 +36,10 @@ class ScheduleChange(Base):
     __tablename__ = "schedule_changes"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    replanning_run_id = Column(String(36), ForeignKey("replanning_runs.id"), index=True, nullable=False)
-    student_id = Column(String(36), ForeignKey("students.id"), index=True, nullable=False)
-    company_id = Column(String(36), ForeignKey("companies.id"), index=True, nullable=False)
+    placement_session_id = Column(String(36), ForeignKey("placement_sessions.id", ondelete="CASCADE"), index=True, nullable=True)
+    replanning_run_id = Column(String(36), ForeignKey("replanning_runs.id", ondelete="CASCADE"), index=True, nullable=False)
+    student_id = Column(String(36), ForeignKey("students.id", ondelete="CASCADE"), index=True, nullable=False)
+    company_id = Column(String(36), ForeignKey("companies.id", ondelete="CASCADE"), index=True, nullable=False)
     change_type = Column(String(50), nullable=False)  # UNCHANGED, MOVED, CANCELLED, NEW
     old_slot_index = Column(Integer, nullable=True)
     new_slot_index = Column(Integer, nullable=True)
@@ -53,6 +56,7 @@ class Notification(Base):
     __tablename__ = "notifications"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    placement_session_id = Column(String(36), ForeignKey("placement_sessions.id", ondelete="CASCADE"), index=True, nullable=True)
     user_id = Column(String(36), ForeignKey("users.id"), index=True, nullable=False)
     title = Column(String(255), nullable=False)
     message = Column(Text, nullable=False)
@@ -67,6 +71,7 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    placement_session_id = Column(String(36), ForeignKey("placement_sessions.id", ondelete="CASCADE"), index=True, nullable=True)
     user_id = Column(String(36), nullable=True)
     user_email = Column(String(255), nullable=True)
     user_role = Column(String(50), nullable=True)
@@ -85,6 +90,7 @@ class ChangeEvent(Base):
     __tablename__ = "change_events"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    placement_session_id = Column(String(36), ForeignKey("placement_sessions.id", ondelete="CASCADE"), index=True, nullable=True)
     event_type = Column(String(100), nullable=False)
     entity_type = Column(String(50), nullable=False)
     entity_id = Column(String(36), nullable=True)

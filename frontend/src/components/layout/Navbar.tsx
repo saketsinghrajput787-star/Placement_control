@@ -3,7 +3,7 @@ import { useAuth } from '../../store/authStore';
 import { useOperations } from '../../store/operationsStore';
 import { Badge } from '../common/Badge';
 import { Button } from '../common/Button';
-import { Bot, RefreshCw, LogOut, ShieldAlert, History, GitCompare } from 'lucide-react';
+import { Bot, RefreshCw, LogOut, ShieldAlert, History, GitCompare, RotateCcw } from 'lucide-react';
 import { LiveStatusBadge } from './LiveStatusBadge';
 import { NotificationBell } from './NotificationBell';
 
@@ -18,7 +18,8 @@ export const Navbar: React.FC = () => {
     setIsDisruptionModalOpen, 
     setIsDiffModalOpen,
     setIsHistoryDrawerOpen,
-    generateSchedule, 
+    generateSchedule,
+    resetSchedule,
     isLoading 
   } = useOperations();
 
@@ -64,8 +65,18 @@ export const Navbar: React.FC = () => {
 
       <div className="flex items-center gap-3">
         <button
+          onClick={() => resetSchedule()}
+          disabled={isLoading}
+          className="px-3 py-1.5 rounded-xl border border-sand-300 text-xs font-bold text-sand-900 bg-sand-100 hover:bg-sand-200 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 disabled:opacity-50"
+          title="Reset All Cancellations & Restore Baseline Schedule"
+        >
+          <RotateCcw className={`w-3.5 h-3.5 text-forest-700 ${isLoading ? 'animate-spin' : ''}`} />
+          <span>{isLoading ? 'Resetting...' : 'Reset Original'}</span>
+        </button>
+
+        <button
           onClick={() => setIsDiffModalOpen(true)}
-          className="px-3 py-1.5 rounded-xl border border-sand-300 text-xs font-bold text-sand-800 bg-sand-100 hover:bg-sand-200 transition-colors flex items-center gap-1.5"
+          className="px-3 py-1.5 rounded-xl border border-sand-300 text-xs font-bold text-sand-800 bg-sand-100 hover:bg-sand-200 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
           title="Compare Schedule Versions"
         >
           <GitCompare className="w-3.5 h-3.5 text-forest-700" />

@@ -1,16 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { apiClient } from '../../api/client';
 import { Company } from '../../types';
+import { useOperations } from '../../store/operationsStore';
 import { Badge } from '../../components/common/Badge';
 import { Building2, Search } from 'lucide-react';
 
 export const CompaniesPage: React.FC = () => {
+  const { scheduleVersion, syncCounter } = useOperations();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [search, setSearch] = useState('');
 
   useEffect(() => {
     apiClient.get('/companies').then((res) => setCompanies(res.data)).catch(console.error);
-  }, []);
+  }, [scheduleVersion, syncCounter]);
 
   const filtered = companies.filter((c) => {
     if (search) {

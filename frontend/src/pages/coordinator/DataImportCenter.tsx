@@ -151,9 +151,7 @@ const DataImportCenterContent: React.FC = () => {
     formData.append('uploaded_by', 'Coordinator');
 
     try {
-      const res = await apiClient.post('/documents/upload', formData, {
-        headers: { 'Content-Type': undefined }
-      });
+      const res = await apiClient.post('/documents/upload', formData);
       setUploadResult(res.data);
       if (res.data?.document_type) {
         setCategory(res.data.document_type);
@@ -167,12 +165,14 @@ const DataImportCenterContent: React.FC = () => {
     }
   };
 
+  const [importMode, setImportMode] = useState<string>('REPLACE');
+
   const handleConfirmImport = async (docId: string) => {
     setIsImporting(true);
     setError(null);
     try {
-      const res = await apiClient.post(`/documents/${docId}/import`);
-      setSuccessMsg(`Successfully imported document! Created version V${res.data?.version || 1}.`);
+      const res = await apiClient.post(`/documents/${docId}/import?import_mode=${importMode}`);
+      setSuccessMsg(`Successfully imported document! Mode: ${importMode}.`);
       setUploadResult(null);
       setPreviewDoc(null);
       fetchDocuments();

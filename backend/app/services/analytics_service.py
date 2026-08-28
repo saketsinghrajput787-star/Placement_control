@@ -9,21 +9,27 @@ from app.ai.risk_engine import BottleneckRiskEngine
 
 class AnalyticsService:
     @staticmethod
-    def get_dashboard_analytics(db: Session, version_id: str = None) -> Dict[str, Any]:
+    def get_dashboard_analytics(db: Session, placement_session_id: str, version_id: str = None) -> Dict[str, Any]:
         if not version_id:
-            latest = db.query(ScheduleVersion).order_by(ScheduleVersion.version_number.desc()).first()
+            latest = db.query(ScheduleVersion).filter(
+                ScheduleVersion.placement_session_id == placement_session_id
+            ).order_by(ScheduleVersion.version_number.desc()).first()
             if not latest:
+                total_students = db.query(Student).filter(Student.placement_session_id == placement_session_id, Student.is_active == True).count()
+                total_companies = db.query(Company).filter(Company.placement_session_id == placement_session_id, Company.is_active == True).count()
+                total_rooms = db.query(Room).filter(Room.placement_session_id == placement_session_id, Room.is_active == True).count()
+                total_panels = db.query(Panel).filter(Panel.placement_session_id == placement_session_id, Panel.is_active == True).count()
                 return {
-                    "total_students": db.query(Student).count(),
-                    "total_companies": db.query(Company).count(),
-                    "total_rooms": db.query(Room).count(),
-                    "total_panels": db.query(Panel).count(),
+                    "total_students": total_students,
+                    "total_companies": total_companies,
+                    "total_rooms": total_rooms,
+                    "total_panels": total_panels,
                     "total_interviews": 0,
                     "scheduled_interviews": 0,
                     "unscheduled_interviews": 0,
                     "active_conflicts_count": 0,
                     "schedule_stability": 100.0,
-                    "current_risk_level": "LOW",
+                    "current_risk_level": "NONE" if (total_students == 0 and total_companies == 0) else "LOW",
                     "room_utilization_avg": 0.0,
                     "panel_utilization_avg": 0.0,
                     "student_waiting_avg": 0.0,
@@ -36,13 +42,19 @@ class AnalyticsService:
             version_id = latest.id
             version_obj = latest
         else:
-            version_obj = db.query(ScheduleVersion).get(version_id)
+            version_obj = db.query(ScheduleVersion).filter(
+                ScheduleVersion.id == version_id,
+                ScheduleVersion.placement_session_id == placement_session_id
+            ).first()
 
-        interviews = db.query(Interview).filter(Interview.schedule_version_id == version_id).all()
-        students = db.query(Student).all()
-        companies = db.query(Company).all()
-        rooms = db.query(Room).all()
-        panels = db.query(Panel).all()
+        interviews = db.query(Interview).filter(
+            Interview.placement_session_id == placement_session_id,
+            Interview.schedule_version_id == version_id
+        ).all()
+        students = db.query(Student).filter(Student.placement_session_id == placement_session_id, Student.is_active == True).all()
+        companies = db.query(Company).filter(Company.placement_session_id == placement_session_id, Company.is_active == True).all()
+        rooms = db.query(Room).filter(Room.placement_session_id == placement_session_id, Room.is_active == True).all()
+        panels = db.query(Panel).filter(Panel.placement_session_id == placement_session_id, Panel.is_active == True).all()
 
         total_students = len(students)
         total_companies = len(companies)
@@ -50,7 +62,6 @@ class AnalyticsService:
         total_panels = len(panels)
         scheduled_count = len(interviews)
 
-        # Build format dicts
         iv_dicts = [
             {
                 "id": iv.id,
@@ -69,10 +80,8 @@ class AnalyticsService:
         room_dicts = [{"id": r.id, "room_code": r.room_code, "building": r.building} for r in rooms]
         panel_dicts = [{"id": p.id, "panel_code": p.panel_code, "company_id": p.company_id} for p in panels]
 
-        # Calculate bottlenecks
         bottlenecks = BottleneckRiskEngine.calculate_bottlenecks(iv_dicts, comp_dicts, room_dicts, panel_dicts, num_slots=12)
 
-        # Calculate room utilization
         room_usage = {}
         for iv in interviews:
             room_usage[iv.room_id] = room_usage.get(iv.room_id, 0) + 1
@@ -91,7 +100,6 @@ class AnalyticsService:
             })
         top_rooms.sort(key=lambda x: x["utilization_pct"], reverse=True)
 
-        # Calculate panel utilization
         panel_usage = {}
         for iv in interviews:
             panel_usage[iv.panel_id] = panel_usage.get(iv.panel_id, 0) + 1
@@ -111,12 +119,10 @@ class AnalyticsService:
             })
         top_panels.sort(key=lambda x: x["utilization_pct"], reverse=True)
 
-        # Hourly interview density
         hourly_density = {}
         for iv in interviews:
             hourly_density[iv.start_time_str] = hourly_density.get(iv.start_time_str, 0) + 1
 
-        # Company load distribution
         comp_load = {}
         for iv in interviews:
             comp_load[iv.company_id] = comp_load.get(iv.company_id, 0) + 1
@@ -133,8 +139,8 @@ class AnalyticsService:
                 })
         company_distribution.sort(key=lambda x: x["interviews_count"], reverse=True)
 
-        room_util_avg = round((scheduled_count / max(1, total_rooms * 12)) * 100.0, 1)
-        panel_util_avg = round((scheduled_count / max(1, total_panels * 12)) * 100.0, 1)
+        room_util_avg = round((scheduled_count / max(1, total_rooms * 12)) * 100.0, 1) if total_rooms > 0 else 0.0
+        panel_util_avg = round((scheduled_count / max(1, total_panels * 12)) * 100.0, 1) if total_panels > 0 else 0.0
 
         risk_level = "LOW"
         if any(b["risk_level"] == "CRITICAL" for b in bottlenecks):
@@ -157,7 +163,7 @@ class AnalyticsService:
             "current_risk_level": risk_level,
             "room_utilization_avg": min(100.0, room_util_avg),
             "panel_utilization_avg": min(100.0, panel_util_avg),
-            "student_waiting_avg": 1.2,
+            "student_waiting_avg": 0.0 if scheduled_count == 0 else 1.2,
             "bottlenecks": bottlenecks,
             "top_utilized_rooms": top_rooms[:8],
             "top_utilized_panels": top_panels[:8],

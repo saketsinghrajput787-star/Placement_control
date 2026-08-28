@@ -3,7 +3,10 @@ import { apiClient } from '../../api/client';
 import { Student, Interview } from '../../types';
 import { TimelineView } from '../../components/schedule/TimelineView';
 
+import { useOperations } from '../../store/operationsStore';
+
 export const StudentSchedulePage: React.FC = () => {
+  const { scheduleVersion, syncCounter } = useOperations();
   const [profile, setProfile] = useState<Student | null>(null);
   const [interviews, setInterviews] = useState<Interview[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -16,7 +19,7 @@ export const StudentSchedulePage: React.FC = () => {
       if (res) setInterviews(res.data);
     }).catch(console.error)
       .finally(() => setIsLoading(false));
-  }, []);
+  }, [scheduleVersion, syncCounter]);
 
   if (isLoading) {
     return (

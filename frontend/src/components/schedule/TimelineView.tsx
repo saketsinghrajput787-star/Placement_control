@@ -22,7 +22,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   filterStudentId,
   isCompact = false,
 }) => {
-  const { setSelectedInterview } = useOperations();
+  const { setSelectedInterview, reinstateInterview } = useOperations();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'SCHEDULED' | 'RESCHEDULED' | 'CANCELLED'>('ALL');
   const [selectedSlot, setSelectedSlot] = useState<string | 'ALL'>('ALL');
@@ -31,8 +31,8 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   // Compute status counts
   const totalCount = interviews.length;
   const cancelledCount = interviews.filter((iv) => iv.status === 'CANCELLED').length;
-  const rescheduledCount = interviews.filter((iv) => iv.status !== 'CANCELLED' && (iv.status === 'RESCHEDULED' || !!iv.audit_metadata?.replan_reason || !!iv.audit_metadata?.assignment_reason)).length;
-  const scheduledCount = interviews.filter((iv) => iv.status !== 'CANCELLED' && iv.status !== 'RESCHEDULED' && !iv.audit_metadata?.replan_reason && !iv.audit_metadata?.assignment_reason).length;
+  const rescheduledCount = interviews.filter((iv) => iv.status === 'RESCHEDULED' || iv.status === 'REPLACEMENT').length;
+  const scheduledCount = interviews.filter((iv) => iv.status === 'SCHEDULED').length;
 
   // Filter interviews
   const filtered = interviews.filter((iv) => {
@@ -43,8 +43,8 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     
     // Status Filter
     if (statusFilter === 'CANCELLED' && iv.status !== 'CANCELLED') return false;
-    if (statusFilter === 'RESCHEDULED' && (iv.status === 'CANCELLED' || (iv.status !== 'RESCHEDULED' && !iv.audit_metadata?.replan_reason && !iv.audit_metadata?.assignment_reason))) return false;
-    if (statusFilter === 'SCHEDULED' && (iv.status === 'CANCELLED' || iv.status === 'RESCHEDULED' || iv.audit_metadata?.replan_reason || iv.audit_metadata?.assignment_reason)) return false;
+    if (statusFilter === 'RESCHEDULED' && iv.status !== 'RESCHEDULED' && iv.status !== 'REPLACEMENT') return false;
+    if (statusFilter === 'SCHEDULED' && iv.status !== 'SCHEDULED') return false;
 
     if (search) {
       const q = search.toLowerCase();
@@ -195,7 +195,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
               ) : (
                 filtered.map((iv) => {
                   const isCancelled = iv.status === 'CANCELLED';
-                  const isRescheduled = !isCancelled && (iv.status === 'RESCHEDULED' || !!iv.audit_metadata?.replan_reason || !!iv.audit_metadata?.assignment_reason);
+                  const isRescheduled = iv.status === 'RESCHEDULED' || iv.status === 'REPLACEMENT';
 
                   return (
                     <tr
@@ -263,17 +263,33 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                         )}
                       </td>
                       <td>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedInterview(iv);
-                          }}
-                          className={`text-xs font-semibold underline underline-offset-2 ${
-                            isCancelled ? 'text-rose-700 hover:text-rose-900' : 'text-forest-700 hover:text-forest-900'
-                          }`}
-                        >
-                          Explain Decision
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedInterview(iv);
+                            }}
+                            className={`text-xs font-semibold underline underline-offset-2 ${
+                              isCancelled ? 'text-rose-700 hover:text-rose-900' : 'text-forest-700 hover:text-forest-900'
+                            }`}
+                          >
+                            Explain Decision
+                          </button>
+
+                          {(isCancelled || iv.status === 'UNSCHEDULED') && (
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (iv.student_id && iv.company_id) {
+                                  await reinstateInterview(iv.student_id, iv.company_id);
+                                }
+                              }}
+                              className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100 transition-colors"
+                            >
+                              [ Restore / Schedule ]
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );

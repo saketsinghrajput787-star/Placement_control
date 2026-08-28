@@ -30,7 +30,7 @@ class GroqProvider(BaseAIProvider):
                     ],
                     model=self.model,
                     temperature=0.2,
-                    max_tokens=1000
+                    max_tokens=2048
                 )
                 return chat_completion.choices[0].message.content
             except Exception as e:

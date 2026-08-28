@@ -6,12 +6,12 @@ import { Student, Interview } from '../../types';
 import { Card } from '../../components/common/Card';
 import { MetricCard } from '../../components/common/MetricCard';
 import { Badge } from '../../components/common/Badge';
-import { GraduationCap, Calendar, MapPin, Building2 } from 'lucide-react';
+import { GraduationCap, Calendar, MapPin, Building2, RotateCcw, CheckCircle2 } from 'lucide-react';
 import { CancelInterviewModal } from '../../components/student/CancelInterviewModal';
 
 export const StudentDashboard: React.FC = () => {
   const { user } = useAuth();
-  const { scheduleVersion, setIsDiffModalOpen } = useOperations();
+  const { scheduleVersion, syncCounter, setIsDiffModalOpen, resetSchedule, reinstateInterview } = useOperations();
   const [profile, setProfile] = useState<Student | null>(null);
   const [interviews, setInterviews] = useState<Interview[]>([]);
   const [selectedForCancel, setSelectedForCancel] = useState<Interview | null>(null);
@@ -30,7 +30,7 @@ export const StudentDashboard: React.FC = () => {
 
   useEffect(() => {
     fetchStudentData();
-  }, [scheduleVersion]);
+  }, [scheduleVersion, syncCounter]);
 
   return (
     <div className="space-y-6">
@@ -56,8 +56,17 @@ export const StudentDashboard: React.FC = () => {
             Active Placement Candidate
           </Badge>
           <button
+            onClick={() => resetSchedule()}
+            disabled={isLoading}
+            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 disabled:opacity-50"
+            title="Reset all cancellations and schedule every interview"
+          >
+            <RotateCcw className={`w-3.5 h-3.5 text-amber-700 ${isLoading ? 'animate-spin' : ''}`} />
+            {isLoading ? 'Resetting Schedule...' : '[ Reset All Cancellations ]'}
+          </button>
+          <button
             onClick={() => setIsDiffModalOpen(true)}
-            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-sand-100 text-sand-800 border border-sand-300 hover:bg-sand-200 transition-colors"
+            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-sand-100 text-sand-800 border border-sand-300 hover:bg-sand-200 transition-colors cursor-pointer"
           >
             [ View What Changed ]
           </button>
@@ -111,11 +120,11 @@ export const StudentDashboard: React.FC = () => {
                     <div className="flex items-center gap-3 text-xs text-sand-600 mt-0.5">
                       <span className="flex items-center gap-1 font-semibold text-sand-800">
                         <MapPin className="w-3.5 h-3.5 text-forest-700" />
-                        Room {iv.room_code}
+                        Room {iv.room_code || 'TBD'}
                       </span>
                       <span>•</span>
                       <span className="font-semibold text-sand-800">
-                        Panel {iv.panel_code}
+                        Panel {iv.panel_code || 'TBD'}
                       </span>
                       <span>•</span>
                       <span className="text-amber-700 font-medium">
@@ -126,10 +135,39 @@ export const StudentDashboard: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <Badge variant={iv.status === 'CANCELLED' ? 'critical' : 'healthy'} size="sm" dot>
+                  <Badge variant={iv.status === 'CANCELLED' ? 'critical' : iv.status === 'UNSCHEDULED' ? 'warning' : 'healthy'} size="sm" dot>
                     {iv.status}
                   </Badge>
-                  {iv.status !== 'CANCELLED' && (
+
+                  {iv.status === 'CANCELLED' && (
+                    <button
+                      onClick={async () => {
+                        if (profile?.id && iv.company_id) {
+                          await reinstateInterview(profile.id, iv.company_id);
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors flex items-center gap-1.5"
+                    >
+                      <RotateCcw className="w-3 h-3 text-emerald-600" />
+                      [ RESTORE / SCHEDULE ]
+                    </button>
+                  )}
+
+                  {iv.status === 'UNSCHEDULED' && (
+                    <button
+                      onClick={async () => {
+                        if (profile?.id && iv.company_id) {
+                          await reinstateInterview(profile.id, iv.company_id);
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold bg-forest-50 text-forest-800 border border-forest-300 hover:bg-forest-100 transition-colors flex items-center gap-1.5"
+                    >
+                      <CheckCircle2 className="w-3 h-3 text-forest-700" />
+                      [ SCHEDULE SLOT ]
+                    </button>
+                  )}
+
+                  {iv.status !== 'CANCELLED' && iv.status !== 'UNSCHEDULED' && (
                     <button
                       onClick={() => setSelectedForCancel(iv)}
                       className="px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors"

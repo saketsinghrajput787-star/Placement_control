@@ -13,15 +13,35 @@ class AICopilotService:
     def __init__(self):
         self.provider = GroqProvider()
 
-    def handle_query(self, db: Session, query: str, context_type: str = "GENERAL", entity_id: str = None) -> Dict[str, Any]:
-        analytics = AnalyticsService.get_dashboard_analytics(db)
+    def handle_query(self, db: Session, placement_session_id: str, query: str, context_type: str = "GENERAL", entity_id: str = None) -> Dict[str, Any]:
+        analytics = AnalyticsService.get_dashboard_analytics(db, placement_session_id)
         
-        # Search recent schedule changes or audit logs matching query keywords
-        recent_changes = db.query(ScheduleChange).order_by(ScheduleChange.created_at.desc()).limit(20).all()
+        if analytics["total_students"] == 0 and analytics["total_companies"] == 0:
+            return {
+                "answer": "No placement data has been imported yet for this placement session. Please upload Students, Companies, and Shortlists datasets to begin scheduling and analysis.",
+                "insights": ["No dataset imported"],
+                "relevant_metrics": {
+                    "stability": 100.0,
+                    "scheduled": 0,
+                    "conflicts": 0,
+                    "risk": "NONE"
+                },
+                "suggested_followups": [
+                    "How do I upload student CSV?",
+                    "What CSV schema is required?",
+                    "How does CP-SAT optimization work?"
+                ],
+                "data_grounding": {"total_students": 0, "total_companies": 0, "scheduled_interviews": 0}
+            }
+
+        recent_changes = db.query(ScheduleChange).filter(
+            ScheduleChange.placement_session_id == placement_session_id
+        ).order_by(ScheduleChange.created_at.desc()).limit(20).all()
+
         changes_data = []
         for ch in recent_changes:
-            st = db.query(Student).get(ch.student_id)
-            comp = db.query(Company).get(ch.company_id)
+            st = db.query(Student).filter(Student.id == ch.student_id, Student.placement_session_id == placement_session_id).first()
+            comp = db.query(Company).filter(Company.id == ch.company_id, Company.placement_session_id == placement_session_id).first()
             changes_data.append({
                 "student_code": st.student_code if st else ch.student_id,
                 "company_name": comp.name if comp else ch.company_id,
@@ -42,9 +62,9 @@ class AICopilotService:
 
         system_prompt = (
             "You are the AI Decision Support Copilot for the Live Placement Control Tower. "
-            "Your answers must be grounded ONLY in verified facts from the placement operations database. "
-            "Never hallucinate numbers, student names, or non-existent schedule moves. "
-            f"Current Verified System Facts: {json.dumps(grounding_data)}. "
+            "Your answers must be grounded ONLY in verified facts from the currently uploaded placement session database. "
+            "Never fabricate numbers, student names, company names, or non-existent schedule moves. "
+            f"Current Session Verified Facts: {json.dumps(grounding_data)}. "
             "Provide concise, actionable, and executive-ready operational intelligence."
         )
 
@@ -59,8 +79,8 @@ class AICopilotService:
         ]
 
         followups = [
-            "Why did S0421 move?",
-            "What happened after TechNova delay?",
+            "Which students are affected by recent changes?",
+            "What happened after company delay?",
             "Show recent document import history",
             "Which recovery strategy minimizes student waiting time?"
         ]
@@ -78,15 +98,15 @@ class AICopilotService:
             "data_grounding": grounding_data
         }
 
-    def explain_interview(self, db: Session, interview_id: str) -> Dict[str, Any]:
-        iv = db.query(Interview).get(interview_id)
+    def explain_interview(self, db: Session, placement_session_id: str, interview_id: str) -> Dict[str, Any]:
+        iv = db.query(Interview).filter(Interview.id == interview_id, Interview.placement_session_id == placement_session_id).first()
         if not iv:
-            raise ValueError("Interview not found")
+            raise ValueError("Interview not found in current placement session")
 
-        student = db.query(Student).get(iv.student_id)
-        comp = db.query(Company).get(iv.company_id)
-        room = db.query(Room).get(iv.room_id)
-        panel = db.query(Panel).get(iv.panel_id)
+        student = db.query(Student).filter(Student.id == iv.student_id, Student.placement_session_id == placement_session_id).first()
+        comp = db.query(Company).filter(Company.id == iv.company_id, Company.placement_session_id == placement_session_id).first()
+        room = db.query(Room).filter(Room.id == iv.room_id, Room.placement_session_id == placement_session_id).first()
+        panel = db.query(Panel).filter(Panel.id == iv.panel_id, Panel.placement_session_id == placement_session_id).first()
 
         audit_meta = json.loads(iv.audit_metadata) if iv.audit_metadata else {}
 

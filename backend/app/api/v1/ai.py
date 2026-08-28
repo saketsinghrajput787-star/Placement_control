@@ -7,7 +7,7 @@ from app.schemas.ai import (
     ExplainInterviewRequest, ExplainInterviewResponse
 )
 from app.ai.copilot_service import AICopilotService
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_current_session_id
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 copilot_service = AICopilotService()
@@ -16,11 +16,13 @@ copilot_service = AICopilotService()
 def query_copilot(
     req: AICopilotQueryRequest,
     db: Session = Depends(get_db),
+    session_id: str = Depends(get_current_session_id),
     current_user: User = Depends(get_current_user)
 ):
     try:
         res = copilot_service.handle_query(
             db=db,
+            placement_session_id=session_id,
             query=req.query,
             context_type=req.context_type,
             entity_id=req.entity_id
@@ -33,11 +35,13 @@ def query_copilot(
 def explain_interview(
     req: ExplainInterviewRequest,
     db: Session = Depends(get_db),
+    session_id: str = Depends(get_current_session_id),
     current_user: User = Depends(get_current_user)
 ):
     try:
         res = copilot_service.explain_interview(
             db=db,
+            placement_session_id=session_id,
             interview_id=req.interview_id
         )
         return res

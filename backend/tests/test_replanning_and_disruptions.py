@@ -23,13 +23,14 @@ def db():
         db_session.close()
 
 def test_multi_disruption_impact_calculation(db):
-    """Test that simulate_disruption unions multi-disruption parameters simultaneously."""
-    company = db.query(Company).filter((Company.company_code == "TECHNOVA") | (Company.company_code == "C001")).first() or db.query(Company).first()
-    panel = db.query(Panel).filter(Panel.company_id == company.id).first() if company else db.query(Panel).first()
-    students = [s.id for s in db.query(Student).limit(5).all()]
+    session_id = "test-session-001"
+    company = db.query(Company).filter(Company.placement_session_id == session_id, (Company.company_code == "TECHNOVA") | (Company.company_code == "C001") | (Company.company_code == "COMP1")).first() or db.query(Company).filter(Company.placement_session_id == session_id).first()
+    panel = db.query(Panel).filter(Panel.placement_session_id == session_id, Panel.company_id == company.id).first() if company else db.query(Panel).filter(Panel.placement_session_id == session_id).first()
+    students = [s.id for s in db.query(Student).filter(Student.placement_session_id == session_id).limit(5).all()]
 
     sim_res = DisruptionService.simulate_disruption(
         db=db,
+        placement_session_id=session_id,
         event_type="COMPANY_DELAY",
         target_entity_type="company",
         target_entity_id=company.id,
@@ -45,10 +46,11 @@ def test_multi_disruption_impact_calculation(db):
     assert sim_res["severity"] in ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
 
 def test_solver_strategy_modes_produce_different_metrics(db):
-    """Test that PlacementScheduler.solve with different strategy_mode values produces different outcomes under disruption."""
-    company = db.query(Company).filter((Company.company_code == "TECHNOVA") | (Company.company_code == "C001")).first() or db.query(Company).first()
+    session_id = "test-session-001"
+    company = db.query(Company).filter(Company.placement_session_id == session_id).first()
     sim_res = DisruptionService.simulate_disruption(
         db=db,
+        placement_session_id=session_id,
         event_type="COMPANY_DELAY",
         target_entity_type="company",
         target_entity_id=company.id,
@@ -58,13 +60,13 @@ def test_solver_strategy_modes_produce_different_metrics(db):
 
     replan_res = ReplanningService.run_replanning(
         db=db,
+        placement_session_id=session_id,
         disruption_id=sim_res["disruption_id"]
     )
 
     strats = replan_res["strategies_comparison"]
     assert len(strats) == 5
 
-    # Verify dynamic metrics exist and are calculated correctly
     for s in strats:
         assert "student_waiting_minutes" in s
         assert "stability_score" in s
@@ -72,16 +74,16 @@ def test_solver_strategy_modes_produce_different_metrics(db):
         assert "panel_utilization_pct" in s
         assert "room_utilization_pct" in s
 
-    # Verify strategies are non-identical
     moved_counts = [s["moved_interviews"] for s in strats]
     scores = [s["overall_score"] for s in strats]
     assert len(set(moved_counts)) > 1 or len(set(scores)) > 1
 
 def test_replanning_run_persists_comparison_and_diff(db):
-    """Test that ReplanningService.run_replanning produces different strategy comparison scores and diff list."""
-    company = db.query(Company).filter((Company.company_code == "TECHNOVA") | (Company.company_code == "C001")).first() or db.query(Company).first()
+    session_id = "test-session-001"
+    company = db.query(Company).filter(Company.placement_session_id == session_id).first()
     sim_res = DisruptionService.simulate_disruption(
         db=db,
+        placement_session_id=session_id,
         event_type="COMPANY_DELAY",
         target_entity_type="company",
         target_entity_id=company.id,
@@ -91,6 +93,7 @@ def test_replanning_run_persists_comparison_and_diff(db):
 
     replan_res = ReplanningService.run_replanning(
         db=db,
+        placement_session_id=session_id,
         disruption_id=sim_res["disruption_id"]
     )
 
@@ -98,19 +101,18 @@ def test_replanning_run_persists_comparison_and_diff(db):
     assert len(replan_res["strategies_comparison"]) == 5
     assert len(replan_res["diff"]) > 0
 
-    # Ensure strategies have non-identical results across moved, stability, or overall_score
     strategies = replan_res["strategies_comparison"]
     scores = [s["overall_score"] for s in strategies]
     stabilities = [s["stability_score"] for s in strategies]
 
-    # At least two strategies must differ in stability or overall score
     assert len(set(scores)) > 1 or len(set(stabilities)) > 1, f"Strategies should produce different scores: {scores}"
 
 def test_apply_recovery_strategy(db):
-    """Test applying a recovery strategy creates a new ScheduleVersion and sets disruption status to APPLIED."""
-    company = db.query(Company).filter((Company.company_code == "TECHNOVA") | (Company.company_code == "C001")).first() or db.query(Company).first()
+    session_id = "test-session-001"
+    company = db.query(Company).filter(Company.placement_session_id == session_id).first()
     sim_res = DisruptionService.simulate_disruption(
         db=db,
+        placement_session_id=session_id,
         event_type="COMPANY_DELAY",
         target_entity_type="company",
         target_entity_id=company.id,
@@ -120,11 +122,13 @@ def test_apply_recovery_strategy(db):
 
     replan_res = ReplanningService.run_replanning(
         db=db,
+        placement_session_id=session_id,
         disruption_id=sim_res["disruption_id"]
     )
 
     apply_res = ReplanningService.apply_replan_strategy(
         db=db,
+        placement_session_id=session_id,
         replanning_run_id=replan_res["replanning_run_id"],
         strategy_type="BALANCED"
     )
@@ -133,5 +137,5 @@ def test_apply_recovery_strategy(db):
     assert apply_res["new_schedule_version_id"] is not None
     assert apply_res["version_number"] > 1
 
-    disruption = db.query(Disruption).get(sim_res["disruption_id"])
+    disruption = db.query(Disruption).filter(Disruption.id == sim_res["disruption_id"]).first()
     assert disruption.status == "APPLIED"
