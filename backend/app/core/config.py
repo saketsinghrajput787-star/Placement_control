@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     GROQ_MODEL: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
     
     # CORS
-    CORS_ORIGINS: List[str] = [
+    CORS_ORIGINS: Union[List[str], str] = [
         "http://localhost:5173",
         "http://localhost:5174",
         "http://localhost:3000",

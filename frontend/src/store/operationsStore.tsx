@@ -166,11 +166,26 @@ export const OperationsProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   useEffect(() => {
     loadDashboardData();
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.hostname === 'localhost' ? '127.0.0.1:8000' : window.location.host;
+    const apiBase = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || '';
+    let wsUrl: string;
     const roleParam = user?.role || 'COORDINATOR';
     const userParam = user?.id || '';
-    const wsUrl = `${protocol}//${host}/ws?role=${roleParam}&user_id=${userParam}`;
+
+    if (apiBase && (apiBase.startsWith('http://') || apiBase.startsWith('https://'))) {
+      try {
+        const parsed = new URL(apiBase);
+        const wsProtocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${wsProtocol}//${parsed.host}/ws?role=${roleParam}&user_id=${userParam}`;
+      } catch (e) {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.hostname === 'localhost' ? '127.0.0.1:8000' : window.location.host;
+        wsUrl = `${protocol}//${host}/ws?role=${roleParam}&user_id=${userParam}`;
+      }
+    } else {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.hostname === 'localhost' ? '127.0.0.1:8000' : window.location.host;
+      wsUrl = `${protocol}//${host}/ws?role=${roleParam}&user_id=${userParam}`;
+    }
 
     let socket: WebSocket | null = null;
     let reconnectTimer: any = null;
